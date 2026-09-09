@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Aperture, ArrowLeft, ArrowRight, BarChart3, BookOpen, Bot, Camera, Check,
   CheckCircle2, ChevronRight, CircleAlert, CircleHelp, ClipboardCheck, Clock3,
-  Download, FileText, FlaskConical, Gauge, History, Home, ImagePlus, Info,
+  Download, FileText, FlaskConical, Gauge, History, Home, Info,
   Lightbulb, ListChecks, MessageCircle, Microscope, Play, RotateCcw, Save,
   ScanLine, Send, SlidersHorizontal, Sparkles, Target, Telescope, Upload, Waves,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import AuroraField from "./AuroraField";
 import {
   calibrateSpectrum, compareReadings, diffractionAngle, measureGrating,
   SPECTRAL_LIBRARY, type MeasurementLine,
@@ -39,6 +40,13 @@ const mercuryReadings: MeasurementLine[] = SPECTRAL_LIBRARY.mercury.map((line, i
   thetaDeg: Number(((diffractionAngle(line.wavelengthNm) ?? 0) + [0.006, -0.004, 0.005, -0.006, 0.004][index]).toFixed(4)),
   label: line.family,
 }));
+
+const analysisPipeline = [
+  { title: "图像校正", detail: "倾斜 0.7°", icon: SlidersHorizontal },
+  { title: "峰值检测", detail: "5 条谱线", icon: Waves },
+  { title: "谱线匹配", detail: "Hg-I · 97.6%", icon: Target },
+  { title: "参数反演", detail: "d = 3.331 μm", icon: BarChart3 },
+];
 
 function classifyColor(r: number, g: number, b: number) {
   const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
@@ -127,22 +135,118 @@ function PageHeading({ eyebrow, title, description, action }: { eyebrow: string;
   return <div className="module-heading"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{description && <p className="heading-description">{description}</p>}</div>{action}</div>;
 }
 
-function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
+const AnalysisGlassPanel = memo(function AnalysisGlassPanel() {
+  const [stage, setStage] = useState(0);
+
+  useEffect(() => {
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let timer = 0;
+    const start = () => {
+      window.clearInterval(timer);
+      if (motionQuery.matches) {
+        setStage(analysisPipeline.length - 1);
+        return;
+      }
+      timer = window.setInterval(() => {
+        if (!document.hidden) setStage((value) => (value + 1) % analysisPipeline.length);
+      }, 1700);
+    };
+    start();
+    motionQuery.addEventListener("change", start);
+    return () => {
+      window.clearInterval(timer);
+      motionQuery.removeEventListener("change", start);
+    };
+  }, []);
+
   return (
-    <div className="module-page home-module">
-      <section className="home-hero">
+    <aside className="analysis-float" aria-label="衍射图样分析流程示例">
+      <div className="analysis-window-bar">
+        <span className="window-dots"><i /><i /><i /></span>
+        <span>衍射图样分析</span>
+        <em><i />实时演示</em>
+      </div>
+      <div className="analysis-visual">
+        <div className="analysis-grid" />
+        <span className="analysis-axis x" /><span className="analysis-axis y" />
+        {SPECTRAL_LIBRARY.mercury.map((line, index) => (
+          <i
+            key={line.wavelengthNm}
+            className={index <= stage ? "visible" : ""}
+            style={{ left: `${[13, 28, 57, 77, 81][index]}%`, backgroundColor: line.color }}
+          >
+            <b>{line.wavelengthNm.toFixed(0)}</b>
+          </i>
+        ))}
+        <span className="analysis-scan" />
+        <small>示例数据 · 汞灯一级光谱</small>
+      </div>
+      <div className="analysis-pipeline">
+        {analysisPipeline.map((item, index) => {
+          const Icon = item.icon;
+          const state = index < stage ? "complete" : index === stage ? "active" : "pending";
+          return (
+            <div className={`pipeline-row ${state}`} key={item.title}>
+              <span><Icon size={15} /></span>
+              <strong>{item.title}</strong>
+              <em>{item.detail}</em>
+              {state === "complete" ? <CheckCircle2 size={15} /> : <i />}
+            </div>
+          );
+        })}
+      </div>
+      <div className="analysis-summary">
+        <span><small>拟合质量</small><strong>RMSE 0.42 nm</strong></span>
+        <span><small>反演结果</small><strong>300.2 线/mm</strong></span>
+      </div>
+    </aside>
+  );
+});
+
+function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
+  const heroRef = useRef<HTMLElement>(null);
+  const [scrollProgress, setScrollProgress] = useState(0);
+
+  useEffect(() => {
+    let frame = 0;
+    let previous = -1;
+    const update = () => {
+      const hero = heroRef.current;
+      if (!hero) return;
+      const rect = hero.getBoundingClientRect();
+      const progress = Math.min(1, Math.max(0, -rect.top / Math.max(hero.offsetHeight * .72, 1)));
+      if (Math.abs(progress - previous) > .008) {
+        previous = progress;
+        setScrollProgress(progress);
+      }
+    };
+    const onScroll = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(update);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, []);
+
+  return (
+    <div className="module-page home-module" style={{ "--hero-scroll": scrollProgress } as React.CSSProperties}>
+      <section ref={heroRef} className="home-hero">
+        <AuroraField intensity={1.08} scrollProgress={scrollProgress} />
+        <div className="hero-noise" aria-hidden="true" />
         <div className="hero-copy">
           <p className="eyebrow">AI + 物理实验</p>
           <h1>融合 AI 技术的衍射图样分析与参数反演研究</h1>
           <p>课前先在虚拟仪器上找谱线，课中由 AI 认线并与手读互证，课后沿着证据回放每一步。</p>
           <div className="hero-actions"><button className="primary-action" onClick={() => navigate("analysis")}><ScanLine size={18} />开始图像分析</button><button className="secondary-action" onClick={() => navigate("simulator")}><Play size={17} />进入虚拟实验</button></div>
         </div>
-        <div className="hero-orbit" aria-label="课前课中课后学习闭环">
-          <div className="orbit-core"><Aperture size={38} /><strong>SPECTRA</strong><small>学习闭环</small></div>
-          <div className="orbit-card pre"><Telescope size={20} /><span><small>课前</small>虚拟预习</span></div>
-          <div className="orbit-card live"><ScanLine size={20} /><span><small>课中</small>AI 测量</span></div>
-          <div className="orbit-card post"><History size={20} /><span><small>课后</small>证据复盘</span></div>
-        </div>
+        <AnalysisGlassPanel />
+        <div className="hero-scroll-cue" aria-hidden="true"><span>向下探索</span><i /></div>
       </section>
       <section className="pain-grid">
         {[
@@ -230,9 +334,8 @@ function FitChart({ points }: { points: { wavelengthNm: number; sinTheta: number
 }
 
 function AnalysisModule({ analyzeSignal = 0 }: { analyzeSignal?: number }) {
-  const [task, setTask] = useState("A"); const [analyzed, setAnalyzed] = useState(false); const [image, setImage] = useState<ImageAnalysis | null>(null); const [busy, setBusy] = useState(false);
+  const [task, setTask] = useState("A"); const [analyzed, setAnalyzed] = useState(analyzeSignal > 0); const [image, setImage] = useState<ImageAnalysis | null>(null); const [busy, setBusy] = useState(false);
   const [readings, setReadings] = useState(mercuryReadings); const [showCompare, setShowCompare] = useState(false); const [unknownX, setUnknownX] = useState(821); const fileRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (analyzeSignal) setAnalyzed(true); }, [analyzeSignal]);
   const result = useMemo(() => measureGrating(readings), [readings]);
   const comparison = useMemo(() => compareReadings(readings.map((line, i) => ({ wavelengthNm: line.wavelengthNm, handDeg: line.thetaDeg, aiDeg: (diffractionAngle(line.wavelengthNm) ?? 0) + [.018, .012, .016, .014, .013][i] }))), [readings]);
   const refs = SPECTRAL_LIBRARY.mercury.map((line) => ({ wavelengthNm: line.wavelengthNm, x: 100 + 4000 * Math.tan(Math.asin(line.wavelengthNm / 3333)) }));
@@ -295,5 +398,5 @@ export default function SpectraApp() {
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className="app-shell"><AppHeader active={active} onChange={setActive} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule />}{active === "assistant" && <AssistantModule />}{active === "analysis" && <AnalysisModule analyzeSignal={analyzeSignal} />}{active === "guide" && <GuideModule />}{active === "records" && <RecordsModule />}<footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer><Toaster position="top-center" richColors /></main>;
+  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule />}{active === "assistant" && <AssistantModule />}{active === "analysis" && <AnalysisModule analyzeSignal={analyzeSignal} />}{active === "guide" && <GuideModule />}{active === "records" && <RecordsModule />}<footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer><Toaster position="top-center" richColors /></main>;
 }
