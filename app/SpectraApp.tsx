@@ -323,13 +323,11 @@ function AssistantModule() {
 
 function SpectrumStage({ analyzed, image }: { analyzed: boolean; image: ImageAnalysis | null }) {
   const peaks = image?.peaks.length ? image.peaks : SPECTRAL_LIBRARY.mercury.map((line, index) => ({ xRatio: [.15, .30, .62, .80, .83][index], wavelengthNm: line.wavelengthNm, color: line.color, confidence: .97, family: line.family, x: 0 }));
+  const spectrumOverlay = <><div className="scope-glow" /><div className="crosshair crosshair-x" /><div className="crosshair crosshair-y" />{peaks.map((peak, index) => <div className={`spectrum-line ${analyzed ? "is-analyzed" : ""}`} key={`${peak.xRatio}-${index}`} style={{ left: `${peak.xRatio * 100}%`, backgroundColor: peak.color }}>{analyzed && <span className={`line-label ${peak.xRatio > .65 ? "align-right" : ""}`}>{peak.wavelengthNm ? `Hg · ${peak.wavelengthNm.toFixed(2)} nm` : `${peak.family} 候选`}<small>{Math.round(peak.confidence * 100)}%</small></span>}</div>)}</>;
+  const imageFit = image && image.width / image.height >= 16 / 9 ? "fit-width" : "fit-height";
   return (
-    <div className={`spectrum-stage ${image ? "has-image" : ""}`} style={image ? { aspectRatio: `${image.width} / ${image.height}` } : undefined}>
-      {image && <Image className="spectrum-photo" src={image.preview} alt="上传的光谱照片" fill unoptimized sizes="(max-width: 1050px) 100vw, 72vw" />}
-      {image && <div className="spectrum-photo-shade" aria-hidden="true" />}
-      <div className="scope-glow" />
-      <div className="crosshair crosshair-x" /><div className="crosshair crosshair-y" />
-      {peaks.map((peak, index) => <div className={`spectrum-line ${analyzed ? "is-analyzed" : ""}`} key={`${peak.xRatio}-${index}`} style={{ left: `${peak.xRatio * 100}%`, backgroundColor: peak.color }}>{analyzed && <span className={`line-label ${peak.xRatio > .65 ? "align-right" : ""}`}>{peak.wavelengthNm ? `Hg · ${peak.wavelengthNm.toFixed(2)} nm` : `${peak.family} 候选`}<small>{Math.round(peak.confidence * 100)}%</small></span>}</div>)}
+    <div className={`spectrum-stage ${image ? "has-image" : ""}`}>
+      {image ? <div className={`spectrum-image-frame ${imageFit}`} style={{ aspectRatio: `${image.width} / ${image.height}` }}><Image className="spectrum-photo" src={image.preview} alt="上传的光谱照片" fill unoptimized sizes="(max-width: 1050px) 100vw, 72vw" /><div className="spectrum-photo-shade" aria-hidden="true" />{spectrumOverlay}</div> : spectrumOverlay}
       <div className="stage-caption"><span className="live-dot" />{image ? "上传图像 · 已完成预处理" : "示例图像 · 一级汞灯光谱"}</div>
     </div>
   );
