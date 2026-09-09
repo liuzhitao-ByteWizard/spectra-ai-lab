@@ -116,9 +116,6 @@ h1 { margin: 0; max-width: 760px; font-size: clamp(25px, 3vw, 38px); line-height
 .hero-copy > p:not(.eyebrow) { max-width: 680px; margin: 19px 0 0; color: #abc0d8; font-size: 16px; line-height: 1.8; }
 .hero-actions { display: flex; gap: 10px; margin-top: 29px; }
 .hero-actions .secondary-action { color: white; background: #ffffff0d; border-color: #55708e; }
-.principle-note { max-width: 520px; display: flex; align-items: center; gap: 11px; margin-top: 26px; color: #9bb4cf; font-size: 12px; }
-.principle-note svg { color: #8c7cff; }
-.principle-note strong { color: #e4edf8; margin-right: 9px; }
 .hero-orbit { width: min(430px, 42vw); aspect-ratio: 1; position: relative; justify-self: center; border-radius: 50%; border: 1px solid #739ed42e; box-shadow: inset 0 0 75px #4c89e614, 0 0 100px #020a1680; }
 .hero-orbit::before, .hero-orbit::after { content: ""; position: absolute; border: 1px solid #78a6dd29; border-radius: 50%; inset: 12%; }
 .hero-orbit::after { inset: 27%; background: radial-gradient(circle, #23528b55, transparent 68%); }

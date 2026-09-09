@@ -132,11 +132,10 @@ function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
     <div className="module-page home-module">
       <section className="home-hero">
         <div className="hero-copy">
-          <p className="eyebrow">AI + 物理实验 · 国赛演示版</p>
-          <h1>把分光计实验的三个难点，串成一条可验证的学习链。</h1>
+          <p className="eyebrow">AI + 物理实验</p>
+          <h1>融合 AI 技术的衍射图样分析与参数反演研究</h1>
           <p>课前先在虚拟仪器上找谱线，课中由 AI 认线并与手读互证，课后沿着证据回放每一步。</p>
           <div className="hero-actions"><button className="primary-action" onClick={() => navigate("analysis")}><ScanLine size={18} />开始图像分析</button><button className="secondary-action" onClick={() => navigate("simulator")}><Play size={17} />进入虚拟实验</button></div>
-          <div className="principle-note"><Sparkles size={17} /><span><strong>人机分工原则</strong>AI 负责认线和提示，公式负责算量，学生保留最终判断。</span></div>
         </div>
         <div className="hero-orbit" aria-label="课前课中课后学习闭环">
           <div className="orbit-core"><Aperture size={38} /><strong>SPECTRA</strong><small>学习闭环</small></div>
@@ -296,5 +295,5 @@ export default function SpectraApp() {
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className="app-shell"><AppHeader active={active} onChange={setActive} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule />}{active === "assistant" && <AssistantModule />}{active === "analysis" && <AnalysisModule analyzeSignal={analyzeSignal} />}{active === "guide" && <GuideModule />}{active === "records" && <RecordsModule />}<footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span><p>虚拟仪器用于预习，最终数据以真实实验和人工复核为准。</p></footer><Toaster position="top-center" richColors /></main>;
+  return <main className="app-shell"><AppHeader active={active} onChange={setActive} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule />}{active === "assistant" && <AssistantModule />}{active === "analysis" && <AnalysisModule analyzeSignal={analyzeSignal} />}{active === "guide" && <GuideModule />}{active === "records" && <RecordsModule />}<footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer><Toaster position="top-center" richColors /></main>;
 }
