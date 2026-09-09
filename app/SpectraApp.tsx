@@ -9,6 +9,7 @@ import {
   ScanLine, Send, SlidersHorizontal, Sparkles, Target, Telescope, Upload, Waves,
 } from "lucide-react";
 import { toast } from "sonner";
+import Image from "next/image";
 import { Toaster } from "@/components/ui/sonner";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -255,7 +256,6 @@ function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
           { icon: History, ask: "做完只剩一个结果，过程无法复盘？", answer: "保存峰值、匹配、拟合与诊断，按时间轴回放。", target: "records" as ModuleId },
         ].map((item, index) => <button className="pain-card" key={item.ask} onClick={() => navigate(item.target)}><span className="pain-number">0{index + 1}</span><item.icon size={22} /><strong>{item.ask}</strong><p>{item.answer}</p><em>打开模块 <ArrowRight size={14} /></em></button>)}
       </section>
-      <section className="demo-route"><div><span>5 分钟答辩演示路线</span><strong>虚拟瞄准 60s</strong></div><ChevronRight /><div><strong>汞灯认线与测 d 120s</strong></div><ChevronRight /><div><strong>未知波长 60s</strong></div><ChevronRight /><div><strong>误差复盘 60s</strong></div></section>
     </div>
   );
 }
@@ -306,24 +306,33 @@ function SimulatorModule() {
 
 function AssistantModule() {
   const [question, setQuestion] = useState("");
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string; source?: string }[]>([{ role: "assistant", text: "你可以问我原理、操作、误差或图像算法。我会先帮你定位步骤，再给判断依据。", source: "离线知识库 · 实验总流程" }]);
+  const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string; source?: string }[]>([{ role: "assistant", text: "你可以问我原理、操作、误差或图像算法。我会先帮你定位步骤，再给判断依据。", source: "DeepSeek · 实验课程上下文" }]);
   const [sending, setSending] = useState(false);
   const ask = async (preset?: string) => {
     const value = (preset ?? question).trim(); if (!value || sending) return;
     setMessages((items) => [...items, { role: "user", text: value }]); setQuestion(""); setSending(true);
-    try { const response = await fetch("/api/ai/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: value }) }); const data = await response.json(); setMessages((items) => [...items, { role: "assistant", text: data.answer, source: data.sources?.[0] }]); }
-    catch { setMessages((items) => [...items, { role: "assistant", text: "当前连接不可用。先检查你卡在认线、读数还是计算，我可以按离线步骤继续帮助。", source: "离线知识库" }]); }
+    try { const response = await fetch("/api/ai/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: value }) }); const data = await response.json() as { answer?: string; sources?: string[]; error?: string }; if (!response.ok || !data.answer) throw new Error(data.error || "AI 助教暂时不可用"); setMessages((items) => [...items, { role: "assistant", text: data.answer!, source: data.sources?.[0] }]); }
+    catch (error) { setMessages((items) => [...items, { role: "assistant", text: error instanceof Error ? error.message : "AI 助教暂时不可用，请稍后重试。", source: "系统提示" }]); }
     finally { setSending(false); }
   };
-  return <div className="module-page"><PageHeading eyebrow="预习 · AI 问答助教" title="不给捷径，只给能继续实验的线索。" description="问答范围限定在分光计实验；当前使用离线知识库模式，答案会标出对应算法或实验步骤。" />
+  return <div className="module-page"><PageHeading eyebrow="预习 · AI 问答助教" title="不给捷径，只给能继续实验的线索。" description="问答范围限定在分光计实验；由 DeepSeek 结合课程上下文回答，关键结论仍需用讲义和实验现象复核。" />
     <div className="assistant-grid"><aside className="question-bank panel"><div className="panel-title"><div><span className="step-index"><BookOpen size={15} /></span><h2>常见问题</h2></div></div><div className="quick-questions">{["为什么黄光是两条？", "零级方向为什么重要？", "光栅常数 d 怎么计算？", "照片过曝会影响什么？", "怎么判断系统误差？"].map((text) => <button key={text} onClick={() => ask(text)}><MessageCircle size={15} />{text}<ChevronRight size={15} /></button>)}</div><div className="knowledge-scope"><strong>知识范围</strong><span>实验原理</span><span>仪器操作</span><span>误差诊断</span><span>本组算法</span></div></aside>
-      <section className="chat-panel panel"><div className="chat-status"><span><i />离线知识库模式</span><em>回答引用实验章节</em></div><div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}><span>{message.role === "assistant" ? <Bot size={17} /> : "你"}</span><div><p>{message.text}</p>{message.source && <small><BookOpen size={12} />{message.source}</small>}</div></div>)}{sending && <div className="message assistant"><span><Bot size={17} /></span><div><p>正在检索对应实验步骤…</p></div></div>}</div><form className="chat-input" onSubmit={(e) => { e.preventDefault(); ask(); }}><textarea value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="例如：为什么左右两侧都要读数？" /><button type="submit" aria-label="发送问题"><Send size={18} /></button></form><p className="chat-hint">AI 可能出错，请用讲义和实验现象复核关键结论。</p></section></div>
+      <section className="chat-panel panel"><div className="chat-status"><span><i />DeepSeek 在线助教</span><em>结合实验课程上下文</em></div><div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}><span>{message.role === "assistant" ? <Bot size={17} /> : "你"}</span><div><p>{message.text}</p>{message.source && <small><BookOpen size={12} />{message.source}</small>}</div></div>)}{sending && <div className="message assistant"><span><Bot size={17} /></span><div><p>正在请 DeepSeek 分析问题…</p></div></div>}</div><form className="chat-input" onSubmit={(e) => { e.preventDefault(); ask(); }}><textarea value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="例如：为什么左右两侧都要读数？" /><button type="submit" aria-label="发送问题"><Send size={18} /></button></form><p className="chat-hint">AI 可能出错，请用讲义和实验现象复核关键结论。</p></section></div>
   </div>;
 }
 
 function SpectrumStage({ analyzed, image }: { analyzed: boolean; image: ImageAnalysis | null }) {
   const peaks = image?.peaks.length ? image.peaks : SPECTRAL_LIBRARY.mercury.map((line, index) => ({ xRatio: [.15, .30, .62, .80, .83][index], wavelengthNm: line.wavelengthNm, color: line.color, confidence: .97, family: line.family, x: 0 }));
-  return <div className={`spectrum-stage ${image ? "has-image" : ""}`} style={image ? { backgroundImage: `linear-gradient(#03101a55,#03101a55),url(${image.preview})` } : undefined}><div className="scope-glow" /><div className="crosshair crosshair-x" /><div className="crosshair crosshair-y" />{peaks.map((peak, index) => <div className={`spectrum-line ${analyzed ? "is-analyzed" : ""}`} key={`${peak.xRatio}-${index}`} style={{ left: `${peak.xRatio * 100}%`, backgroundColor: peak.color }}>{analyzed && <span className={`line-label ${peak.xRatio > .65 ? "align-right" : ""}`}>{peak.wavelengthNm ? `Hg · ${peak.wavelengthNm.toFixed(2)} nm` : `${peak.family} 候选`}<small>{Math.round(peak.confidence * 100)}%</small></span>}</div>)}<div className="stage-caption"><span className="live-dot" />{image ? "上传图像 · 已完成预处理" : "示例图像 · 一级汞灯光谱"}</div></div>;
+  return (
+    <div className={`spectrum-stage ${image ? "has-image" : ""}`} style={image ? { aspectRatio: `${image.width} / ${image.height}` } : undefined}>
+      {image && <Image className="spectrum-photo" src={image.preview} alt="上传的光谱照片" fill unoptimized sizes="(max-width: 1050px) 100vw, 72vw" />}
+      {image && <div className="spectrum-photo-shade" aria-hidden="true" />}
+      <div className="scope-glow" />
+      <div className="crosshair crosshair-x" /><div className="crosshair crosshair-y" />
+      {peaks.map((peak, index) => <div className={`spectrum-line ${analyzed ? "is-analyzed" : ""}`} key={`${peak.xRatio}-${index}`} style={{ left: `${peak.xRatio * 100}%`, backgroundColor: peak.color }}>{analyzed && <span className={`line-label ${peak.xRatio > .65 ? "align-right" : ""}`}>{peak.wavelengthNm ? `Hg · ${peak.wavelengthNm.toFixed(2)} nm` : `${peak.family} 候选`}<small>{Math.round(peak.confidence * 100)}%</small></span>}</div>)}
+      <div className="stage-caption"><span className="live-dot" />{image ? "上传图像 · 已完成预处理" : "示例图像 · 一级汞灯光谱"}</div>
+    </div>
+  );
 }
 
 function FitChart({ points }: { points: { wavelengthNm: number; sinTheta: number }[] }) {
@@ -336,6 +345,7 @@ function FitChart({ points }: { points: { wavelengthNm: number; sinTheta: number
 function AnalysisModule({ analyzeSignal = 0 }: { analyzeSignal?: number }) {
   const [task, setTask] = useState("A"); const [analyzed, setAnalyzed] = useState(analyzeSignal > 0); const [image, setImage] = useState<ImageAnalysis | null>(null); const [busy, setBusy] = useState(false);
   const [readings, setReadings] = useState(mercuryReadings); const [showCompare, setShowCompare] = useState(false); const [unknownX, setUnknownX] = useState(821); const fileRef = useRef<HTMLInputElement>(null);
+  useEffect(() => () => { if (image?.preview) URL.revokeObjectURL(image.preview); }, [image?.preview]);
   const result = useMemo(() => measureGrating(readings), [readings]);
   const comparison = useMemo(() => compareReadings(readings.map((line, i) => ({ wavelengthNm: line.wavelengthNm, handDeg: line.thetaDeg, aiDeg: (diffractionAngle(line.wavelengthNm) ?? 0) + [.018, .012, .016, .014, .013][i] }))), [readings]);
   const refs = SPECTRAL_LIBRARY.mercury.map((line) => ({ wavelengthNm: line.wavelengthNm, x: 100 + 4000 * Math.tan(Math.asin(line.wavelengthNm / 3333)) }));
