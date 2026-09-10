@@ -13,6 +13,7 @@ import Image from "next/image";
 import { Toaster } from "@/components/ui/sonner";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import AssistantAnswer from "./AssistantAnswer";
 import AuroraField from "./AuroraField";
 import {
   calibrateSpectrum, compareReadings, diffractionAngle, measureGrating,
@@ -306,7 +307,7 @@ function SimulatorModule() {
 
 function AssistantModule() {
   const [question, setQuestion] = useState("");
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string; source?: string }[]>([{ role: "assistant", text: "你可以问我原理、操作、误差或图像算法。我会先帮你定位步骤，再给判断依据。", source: "DeepSeek · 实验课程上下文" }]);
+  const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string; source?: string }[]>([{ role: "assistant", text: "你好，我既能辅导分光计实验，也能回答通用知识、学习、写作、编程和日常问题。直接告诉我你想解决什么。", source: "DeepSeek · 通用 AI 助手" }]);
   const [sending, setSending] = useState(false);
   const ask = async (preset?: string) => {
     const value = (preset ?? question).trim(); if (!value || sending) return;
@@ -315,9 +316,9 @@ function AssistantModule() {
     catch (error) { setMessages((items) => [...items, { role: "assistant", text: error instanceof Error ? error.message : "AI 助教暂时不可用，请稍后重试。", source: "系统提示" }]); }
     finally { setSending(false); }
   };
-  return <div className="module-page"><PageHeading eyebrow="预习 · AI 问答助教" title="不给捷径，只给能继续实验的线索。" description="问答范围限定在分光计实验；由 DeepSeek 结合课程上下文回答，关键结论仍需用讲义和实验现象复核。" />
-    <div className="assistant-grid"><aside className="question-bank panel"><div className="panel-title"><div><span className="step-index"><BookOpen size={15} /></span><h2>常见问题</h2></div></div><div className="quick-questions">{["为什么黄光是两条？", "零级方向为什么重要？", "光栅常数 d 怎么计算？", "照片过曝会影响什么？", "怎么判断系统误差？"].map((text) => <button key={text} onClick={() => ask(text)}><MessageCircle size={15} />{text}<ChevronRight size={15} /></button>)}</div><div className="knowledge-scope"><strong>知识范围</strong><span>实验原理</span><span>仪器操作</span><span>误差诊断</span><span>本组算法</span></div></aside>
-      <section className="chat-panel panel"><div className="chat-status"><span><i />DeepSeek 在线助教</span><em>结合实验课程上下文</em></div><div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}><span>{message.role === "assistant" ? <Bot size={17} /> : "你"}</span><div><p>{message.text}</p>{message.source && <small><BookOpen size={12} />{message.source}</small>}</div></div>)}{sending && <div className="message assistant"><span><Bot size={17} /></span><div><p>正在请 DeepSeek 分析问题…</p></div></div>}</div><form className="chat-input" onSubmit={(e) => { e.preventDefault(); ask(); }}><textarea value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="例如：为什么左右两侧都要读数？" /><button type="submit" aria-label="发送问题"><Send size={18} /></button></form><p className="chat-hint">AI 可能出错，请用讲义和实验现象复核关键结论。</p></section></div>
+  return <div className="module-page"><PageHeading eyebrow="DeepSeek · 通用 AI 助手" title="学习之外，也可以问任何问题。" description="既能继续辅导分光计实验，也能回答通用知识、学习、写作、编程与日常问题。" />
+    <div className="assistant-grid"><aside className="question-bank panel"><div className="panel-title"><div><span className="step-index"><BookOpen size={15} /></span><h2>试试这样问</h2></div></div><div className="quick-questions">{["为什么黄光是两条？", "帮我制定一份复习计划", "解释一个陌生概念", "帮我润色一段文字", "给我一个编程思路"].map((text) => <button key={text} onClick={() => ask(text)}><MessageCircle size={15} />{text}<ChevronRight size={15} /></button>)}</div><div className="knowledge-scope"><strong>能力范围</strong><span>物理实验</span><span>通用知识</span><span>写作整理</span><span>编程分析</span></div></aside>
+      <section className="chat-panel panel"><div className="chat-status"><span><i />DeepSeek 在线助手</span><em>通用问答 · 实验辅导</em></div><div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}><span>{message.role === "assistant" ? <Bot size={17} /> : "你"}</span><div>{message.role === "assistant" ? <AssistantAnswer>{message.text}</AssistantAnswer> : <p>{message.text}</p>}{message.source && <small><BookOpen size={12} />{message.source}</small>}</div></div>)}{sending && <div className="message assistant"><span><Bot size={17} /></span><div><p>正在请 DeepSeek 分析问题…</p></div></div>}</div><form className="chat-input" onSubmit={(e) => { e.preventDefault(); ask(); }}><textarea value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="问实验、学习、写作、编程或其他问题…" /><button type="submit" aria-label="发送问题"><Send size={18} /></button></form><p className="chat-hint">AI 可能出错，重要信息请结合可靠来源核实。</p></section></div>
   </div>;
 }
 
