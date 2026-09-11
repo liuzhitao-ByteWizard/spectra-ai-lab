@@ -143,7 +143,7 @@ function autoMatchMercuryPeaks(image: ImageAnalysis): ReferenceMarker[] {
   if (image.peaks.length < SPECTRAL_LIBRARY.mercury.length) return [];
   const peaks = [...image.peaks].sort((a, b) => a.x - b.x).slice(0, 16);
   const lines = [...SPECTRAL_LIBRARY.mercury].sort((a, b) => a.wavelengthNm - b.wavelengthNm);
-  let best: { score: number; markers: ReferenceMarker[] } | null = null;
+  const best: { value: { score: number; markers: ReferenceMarker[] } | null } = { value: null };
 
   const visit = (start: number, chosen: Peak[]) => {
     if (chosen.length === lines.length) {
@@ -161,14 +161,15 @@ function autoMatchMercuryPeaks(image: ImageAnalysis): ReferenceMarker[] {
         const yellow = chosen.filter((_, index) => mappedLines[index].family === "yellow");
         if (yellow.length === 2) score += Math.min(2, Math.abs(yellow[1].x - yellow[0].x) / Math.max(image.width * .08, 1));
         const markers = chosen.map((peak, index) => ({ wavelengthNm: mappedLines[index].wavelengthNm, xRatio: peak.xRatio }));
-        if (!best || score < best.score) best = { score, markers };
+        if (!best.value || score < best.value.score) best.value = { score, markers };
       }
       return;
     }
     for (let index = start; index <= peaks.length - (lines.length - chosen.length); index++) visit(index + 1, [...chosen, peaks[index]]);
   };
   visit(0, []);
-  return best && best.score < 4.2 ? best.markers.sort((a, b) => a.xRatio - b.xRatio) : [];
+  const winner = best.value;
+  return winner && winner.score < 4.2 ? winner.markers.sort((a, b) => a.xRatio - b.xRatio) : [];
 }
 
 function buildSampleSource(): SpectrumSource {
