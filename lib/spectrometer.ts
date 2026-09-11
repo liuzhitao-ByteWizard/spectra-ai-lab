@@ -87,10 +87,31 @@ export function measureGrating(
   };
 }
 
+function solveSymmetric3(matrix: number[][], vector: number[]) {
+  const a = matrix.map((row) => [...row]);
+  const b = [...vector];
+  for (let column = 0; column < 3; column++) {
+    let pivot = column;
+    for (let row = column + 1; row < 3; row++) if (Math.abs(a[row][column]) > Math.abs(a[pivot][column])) pivot = row;
+    [a[column], a[pivot]] = [a[pivot], a[column]];
+    [b[column], b[pivot]] = [b[pivot], b[column]];
+    const divisor = a[column][column];
+    if (Math.abs(divisor) < 1e-14) return null;
+    for (let index = column; index < 3; index++) a[column][index] /= divisor;
+    b[column] /= divisor;
+    for (let row = 0; row < 3; row++) if (row !== column) {
+      const factor = a[row][column];
+      for (let index = column; index < 3; index++) a[row][index] -= factor * a[column][index];
+      b[row] -= factor * b[column];
+    }
+  }
+  return b;
+}
+
 /**
- * Jointly fits the zero-order position, image scale and grating constant from
- * pixel locations.  The zero order is deliberately allowed outside the crop:
- * many phone photos contain only one side of the first-order spectrum.
+ * Fits the grating projection together with a second-order camera-distortion
+ * term. A phone lens is not an ideal pinhole; ignoring this small curvature
+ * creates the opposite-sign residuals normally seen at the blue/violet edge.
  */
 export function fitGratingFromPixels(
   references: PixelReferenceLine[],
@@ -100,65 +121,65 @@ export function fitGratingFromPixels(
     (line) => Number.isFinite(line.x) && Number.isFinite(line.wavelengthNm) && line.wavelengthNm > 0,
   );
   if (valid.length < 4) throw new Error("自动几何拟合至少需要 4 条有效参考谱线");
+  if (!Number.isFinite(imageWidth) || imageWidth <= 0) throw new Error("图像宽度无效");
 
-  const width = Math.max(100, imageWidth);
-  const evaluate = (x0: number, L: number) => {
-    const sines = valid.map((line) => {
-      const delta = Math.abs(line.x - x0);
-      return delta / Math.sqrt(L * L + delta * delta);
-    });
-    const denominator = sines.reduce((sum, value) => sum + value * value, 0);
-    if (denominator < 1e-12) return { score: Number.POSITIVE_INFINITY, dNm: 0 };
-    const dNm = valid.reduce((sum, line, index) => sum + line.wavelengthNm * sines[index], 0) / denominator;
-    if (!Number.isFinite(dNm) || dNm < 1_000 || dNm > 8_000) return { score: Number.POSITIVE_INFINITY, dNm };
-    const squared = valid.reduce((sum, line, index) => {
-      const residual = line.wavelengthNm - dNm * sines[index];
-      return sum + residual * residual;
-    }, 0);
-    return { score: Math.sqrt(squared / valid.length), dNm };
+  const fitAt = (dNm: number) => {
+    const t = valid.map((line) => Math.tan(Math.asin(line.wavelengthNm / dNm)));
+    const sums = Array.from({ length: 5 }, (_, power) => t.reduce((sum, value) => sum + value ** power, 0));
+    const right = Array.from({ length: 3 }, (_, power) => t.reduce((sum, value, index) => sum + valid[index].x * value ** power, 0));
+    const coefficients = solveSymmetric3([
+      [sums[0], sums[1], sums[2]],
+      [sums[1], sums[2], sums[3]],
+      [sums[2], sums[3], sums[4]],
+    ], right);
+    if (!coefficients) return null;
+    const [x0, L, distortion] = coefficients;
+    const predict = (x: number) => {
+      if (Math.abs(distortion) < 1e-10) return dNm * Math.sin(Math.atan((x - x0) / L));
+      const discriminant = Math.max(0, L * L - 4 * distortion * (x0 - x));
+      const roots = [(-L + Math.sqrt(discriminant)) / (2 * distortion), (-L - Math.sqrt(discriminant)) / (2 * distortion)];
+      const meanT = t.reduce((sum, value) => sum + value, 0) / t.length;
+      const root = roots.reduce((closest, value) => Math.abs(value - meanT) < Math.abs(closest - meanT) ? value : closest, roots[0]);
+      return dNm * Math.sin(Math.atan(root));
+    };
+    const residuals = valid.map((line) => line.wavelengthNm - predict(line.x));
+    const rmseNm = Math.sqrt(residuals.reduce((sum, value) => sum + value * value, 0) / residuals.length);
+    // The nominal grating value is only a very weak tie-breaker along the
+    // d/L degeneracy; real spectral curvature still determines the minimum.
+    const score = rmseNm + .02 * Math.abs(Math.log(dNm / 3333.333));
+    return { dNm, x0, L, distortion, predict, residuals, rmseNm, score };
   };
 
-  let best = { x0: width / 2, L: width * 4, score: Number.POSITIVE_INFINITY, dNm: 3333 };
-  const minL = width * 0.4;
-  // A camera FOV cannot support an arbitrarily large px/rad scale. Keeping a
-  // realistic interval also removes the near-linear d/L degeneracy of a
-  // one-sided crop instead of reporting a tiny residual with an absurd d.
-  const maxL = width * 8;
-  const optimizeScale = (x0: number) => {
-    let lo = Math.log(minL), hi = Math.log(maxL);
-    for (let iteration = 0; iteration < 48; iteration++) {
-      const left = lo + (hi - lo) / 3;
-      const right = hi - (hi - lo) / 3;
-      if (evaluate(x0, Math.exp(left)).score <= evaluate(x0, Math.exp(right)).score) hi = right;
-      else lo = left;
+  let best: ReturnType<typeof fitAt> = null;
+  for (let dNm = 1500; dNm <= 8000; dNm += 5) {
+    const candidate = fitAt(dNm);
+    if (candidate && (!best || candidate.score < best.score)) best = candidate;
+  }
+  if (!best) throw new Error("参考线位置无法形成有效的光栅模型");
+  for (let step = 1; step >= .01; step /= 10) {
+    for (let dNm = best.dNm - 6 * step; dNm <= best.dNm + 6 * step; dNm += step) {
+      const candidate = fitAt(dNm);
+      if (candidate && candidate.score < best.score) best = candidate;
     }
-    const L = Math.exp((lo + hi) / 2);
-    return { x0, L, ...evaluate(x0, L) };
+  }
+
+  const uncertaintyUm = Math.max(.001, best.rmseNm / Math.sqrt(valid.length) / 1000);
+  return {
+    dUm: best.dNm / 1000,
+    uncertaintyUm,
+    linesPerMm: 1_000_000 / best.dNm,
+    nominalDeviationPercent: ((best.dNm / 3333.333 - 1) * 100),
+    rmseNm: best.rmseNm,
+    x0: best.x0,
+    L: Math.abs(best.L),
+    distortion: best.distortion,
+    points: valid.map((line, index) => ({
+      wavelengthNm: line.wavelengthNm,
+      thetaDeg: radToDeg(Math.asin(best!.predict(line.x) / best!.dNm)),
+      sinTheta: best!.predict(line.x) / best!.dNm,
+      residualNm: best!.residuals[index],
+    })),
   };
-
-  // Global search over x₀ with an independently optimized scale at every
-  // position. This follows the narrow coupled x₀/L valley that defeated the
-  // former fixed-geometry and simple coordinate-search approaches.
-  const coarseStep = (5 * width) / 800;
-  for (let xi = 0; xi <= 800; xi++) {
-    const candidate = optimizeScale(-2 * width + coarseStep * xi);
-    if (candidate.score < best.score) best = candidate;
-  }
-  let xStep = coarseStep;
-  for (let round = 0; round < 10; round++) {
-    const candidates = [-1, -.5, 0, .5, 1].map((offset) => optimizeScale(
-      Math.min(3 * width, Math.max(-2 * width, best.x0 + offset * xStep)),
-    ));
-    best = candidates.reduce((winner, candidate) => candidate.score < winner.score ? candidate : winner, best);
-    xStep *= .3;
-  }
-
-  if (!Number.isFinite(best.score)) throw new Error("参考线位置无法形成有效的光栅模型");
-  const measurement = measureGrating(valid.map((line) => ({
-    wavelengthNm: line.wavelengthNm,
-    thetaDeg: radToDeg(Math.atan(Math.abs(line.x - best.x0) / best.L)),
-  })));
-  return { ...measurement, x0: best.x0, L: best.L };
 }
 
 export function calibrateSpectrum(
