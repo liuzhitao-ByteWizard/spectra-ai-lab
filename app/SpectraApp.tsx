@@ -16,12 +16,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AssistantAnswer from "./AssistantAnswer";
 import AuroraField from "./AuroraField";
 import {
-  calibrateSpectrum, diffractionAngle, measureGrating,
+  calibrateSpectrum, diffractionAngle, fitGratingFromPixels, measureGrating,
   SPECTRAL_LIBRARY, type MeasurementLine,
 } from "@/lib/spectrometer";
 
 type ModuleId = "home" | "simulator" | "assistant" | "analysis" | "guide" | "records";
-type Peak = { x: number; xRatio: number; family: string; color: string; confidence: number; wavelengthNm?: number };
+type Peak = { x: number; xRatio: number; family: string; color: string; confidence: number; prominence: number; wavelengthNm?: number };
 type DetectorOptions = { prominence: number; minDistancePx: number };
 type SpectrumSource = {
   preview: string | null; fileName: string; width: number; height: number;
@@ -68,45 +68,107 @@ function classifyColor(r: number, g: number, b: number) {
   return { family: "red", color: "#ff4c62" };
 }
 
-function smoothIntensity(values: number[]) {
+function smoothIntensity(values: number[], radius = 1) {
   return values.map((_, x) => {
     let sum = 0, weights = 0;
-    for (let k = -3; k <= 3; k++) if (values[x + k] !== undefined) {
-      const weight = 4 - Math.abs(k); sum += values[x + k] * weight; weights += weight;
+    for (let k = -radius; k <= radius; k++) if (values[x + k] !== undefined) {
+      const weight = radius + 1 - Math.abs(k); sum += values[x + k] * weight; weights += weight;
     }
     return sum / Math.max(weights, 1);
   });
 }
 
+function classifyPeakColor(source: SpectrumSource, x: number) {
+  const index = Math.round(x);
+  const radius = 14;
+  const sideIndexes = Array.from({ length: radius * 2 }, (_, offset) => index - radius + offset)
+    .filter((sample) => sample >= 0 && sample < source.width && Math.abs(sample - index) > 2);
+  const background = (channel: number[]) => sideIndexes.reduce((sum, sample) => sum + (channel[sample] ?? 0), 0) / Math.max(sideIndexes.length, 1);
+  const r = Math.max(0, (source.red[index] ?? 0) - background(source.red));
+  const g = Math.max(0, (source.green[index] ?? 0) - background(source.green));
+  const b = Math.max(0, (source.blue[index] ?? 0) - background(source.blue));
+  return r + g + b > 2 ? classifyColor(r, g, b) : classifyColor(source.red[index] ?? 0, source.green[index] ?? 0, source.blue[index] ?? 0);
+}
+
 function detectSpectrumPeaks(source: SpectrumSource, options: DetectorOptions): ImageAnalysis {
-  const smooth = smoothIntensity(source.rawIntensity);
+  // Radius 1 keeps the 576.96/579.07 nm doublet separated.  The former
+  // seven-pixel kernel merged it into one broad peak on phone photos.
+  const smooth = smoothIntensity(source.rawIntensity, 1);
   const candidates: { x: number; score: number; prominence: number }[] = [];
-  const minDistance = Number.isFinite(options.minDistancePx) ? Math.min(64, Math.max(2, options.minDistancePx)) : 8;
-  const requiredProminence = Number.isFinite(options.prominence) ? Math.min(.2, Math.max(.005, options.prominence)) : .035;
-  const radius = Math.max(4, minDistance * 2);
+  const minDistance = Number.isFinite(options.minDistancePx) ? Math.min(64, Math.max(2, options.minDistancePx)) : 3;
+  const requiredProminence = Number.isFinite(options.prominence) ? Math.min(.2, Math.max(.004, options.prominence)) : .018;
+  const radius = Math.max(10, minDistance * 4);
   for (let x = 2; x < smooth.length - 2; x++) {
     if (smooth[x] < smooth[x - 1] || smooth[x] <= smooth[x + 1]) continue;
     const left = smooth.slice(Math.max(0, x - radius), x);
     const right = smooth.slice(x + 1, Math.min(smooth.length, x + radius + 1));
     const baseline = Math.max(Math.min(...left), Math.min(...right));
     const prominence = smooth[x] - baseline;
-    if (prominence >= requiredProminence && smooth[x] >= .06) candidates.push({ x, score: smooth[x], prominence });
+    if (prominence >= requiredProminence && smooth[x] >= .035) {
+      const denominator = smooth[x - 1] - 2 * smooth[x] + smooth[x + 1];
+      const offset = Math.abs(denominator) > 1e-8 ? Math.max(-.5, Math.min(.5, .5 * (smooth[x - 1] - smooth[x + 1]) / denominator)) : 0;
+      candidates.push({ x: x + offset, score: smooth[x], prominence });
+    }
   }
   const selected: typeof candidates = [];
-  for (const candidate of candidates.sort((a, b) => b.score - a.score)) {
-    if (selected.every((item) => Math.abs(item.x - candidate.x) >= minDistance)) selected.push(candidate);
-    if (selected.length === 12) break;
+  for (const candidate of candidates.sort((a, b) => (b.prominence + b.score * .2) - (a.prominence + a.score * .2))) {
+    const near = selected.find((item) => Math.abs(item.x - candidate.x) < minDistance);
+    if (!near) selected.push(candidate);
+    else {
+      const first = classifyPeakColor(source, near.x);
+      const second = classifyPeakColor(source, candidate.x);
+      const lo = Math.ceil(Math.min(near.x, candidate.x));
+      const hi = Math.floor(Math.max(near.x, candidate.x));
+      const valley = smooth.slice(lo, hi + 1).reduce((minimum, value) => Math.min(minimum, value), Number.POSITIVE_INFINITY);
+      const separated = Math.min(near.score, candidate.score) - valley > Math.max(.003, requiredProminence * .18);
+      // A resolved yellow doublet is physically meaningful and must not be
+      // discarded merely because its pixel spacing is below the generic NMS.
+      if (first.family === "yellow" && second.family === "yellow" && separated) selected.push(candidate);
+    }
+    if (selected.length === 16) break;
   }
   selected.sort((a, b) => a.x - b.x);
   const peaks = selected.map((item) => {
-    const classified = classifyColor(source.red[item.x] ?? 0, source.green[item.x] ?? 0, source.blue[item.x] ?? 0);
+    const classified = classifyPeakColor(source, item.x);
     const mapped = SPECTRAL_LIBRARY.mercury.find((line) => line.family === classified.family);
     return {
       x: item.x, xRatio: item.x / Math.max(source.width, 1), family: classified.family,
-      color: classified.color, confidence: Math.min(.99, .72 + item.prominence * 2.4 + item.score * .12), wavelengthNm: mapped?.wavelengthNm,
+      color: classified.color, confidence: Math.min(.99, .68 + item.prominence * 3.2 + item.score * .14), prominence: item.prominence, wavelengthNm: mapped?.wavelengthNm,
     };
   });
   return { ...source, smoothIntensity: smooth, peaks };
+}
+
+function autoMatchMercuryPeaks(image: ImageAnalysis): ReferenceMarker[] {
+  if (image.peaks.length < SPECTRAL_LIBRARY.mercury.length) return [];
+  const peaks = [...image.peaks].sort((a, b) => a.x - b.x).slice(0, 16);
+  const lines = [...SPECTRAL_LIBRARY.mercury].sort((a, b) => a.wavelengthNm - b.wavelengthNm);
+  let best: { score: number; markers: ReferenceMarker[] } | null = null;
+
+  const visit = (start: number, chosen: Peak[]) => {
+    if (chosen.length === lines.length) {
+      for (const direction of [1, -1]) {
+        const mappedLines = direction === 1 ? lines : [...lines].reverse();
+        let score = 0;
+        for (let index = 0; index < chosen.length; index++) {
+          const expected = mappedLines[index].family;
+          const actual = chosen[index].family;
+          const familyPenalty = expected === actual ? 0 :
+            ((expected === "violet" && actual === "blue") || (expected === "blue" && actual === "violet")) ? .55 : 2.4;
+          score += familyPenalty + (1 - chosen[index].confidence) * .45;
+        }
+        // The mercury yellow doublet should be adjacent and relatively close.
+        const yellow = chosen.filter((_, index) => mappedLines[index].family === "yellow");
+        if (yellow.length === 2) score += Math.min(2, Math.abs(yellow[1].x - yellow[0].x) / Math.max(image.width * .08, 1));
+        const markers = chosen.map((peak, index) => ({ wavelengthNm: mappedLines[index].wavelengthNm, xRatio: peak.xRatio }));
+        if (!best || score < best.score) best = { score, markers };
+      }
+      return;
+    }
+    for (let index = start; index <= peaks.length - (lines.length - chosen.length); index++) visit(index + 1, [...chosen, peaks[index]]);
+  };
+  visit(0, []);
+  return best && best.score < 4.2 ? best.markers.sort((a, b) => a.xRatio - b.xRatio) : [];
 }
 
 function buildSampleSource(): SpectrumSource {
@@ -126,7 +188,7 @@ function buildSampleSource(): SpectrumSource {
 
 async function analyzeImageFile(file: File): Promise<SpectrumSource> {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 1200 / bitmap.width);
+  const scale = Math.min(1, 2400 / bitmap.width);
   const width = Math.max(1, Math.round(bitmap.width * scale));
   const height = Math.max(1, Math.round(bitmap.height * scale));
   const canvas = document.createElement("canvas");
@@ -144,8 +206,8 @@ async function analyzeImageFile(file: File): Promise<SpectrumSource> {
     for (let x = 0; x < width; x++) {
       const offset = (y * width + x) * 4;
       const r = pixels[offset], g = pixels[offset + 1], b = pixels[offset + 2];
-      const value = Math.max(r, g, b), saturation = value ? (value - Math.min(r, g, b)) / value : 0;
-      scores[x] += weight * value * (.62 + .38 * saturation);
+      const value = Math.max(r, g, b), chroma = value - Math.min(r, g, b);
+      scores[x] += weight * (.38 * value + .62 * chroma);
       reds[x] += r; greens[x] += g; blues[x] += b;
       if (value > 250) over++; sampled++;
     }
@@ -387,9 +449,9 @@ function SpectrumStage({ image, markers = [], onMark, caption }: { image: ImageA
 function MarkerPicker({ selected, setSelected, markers, onClear, onRemove, image, onCandidate }: { selected: number; setSelected: (value: number) => void; markers: ReferenceMarker[]; onClear: () => void; onRemove: (wavelengthNm: number) => void; image: ImageAnalysis | null; onCandidate: (xRatio: number) => void }) {
   return <div className="marker-picker">
     <div className="marker-picker-head"><label>选择要标记的汞灯谱线<select value={selected} onChange={(event) => setSelected(Number(event.target.value))}>{SPECTRAL_LIBRARY.mercury.map((line) => <option value={line.wavelengthNm} key={line.wavelengthNm}>{line.wavelengthNm.toFixed(2)} nm · {line.family}</option>)}</select></label><button onClick={onClear} disabled={!markers.length}>清空</button></div>
-    <p>先选择标准波长，再点击照片中的谱线中心；点击候选峰编号可快速吸附。</p>
-    {image && <div className="candidate-strip" aria-label="检测到的候选峰">{image.peaks.map((peak, index) => <button key={`${peak.x}-${index}`} onClick={() => onCandidate(peak.xRatio)}><i style={{ background: peak.color }} />峰 {index + 1}<small>{peak.x}px</small></button>)}</div>}
-    <div className="selected-markers">{markers.length ? markers.map((marker) => <button key={marker.wavelengthNm} onClick={() => onRemove(marker.wavelengthNm)} title="移除此标记"><i style={{ background: lineColor(marker.wavelengthNm) }} />{marker.wavelengthNm.toFixed(2)} nm<span>×</span></button>) : <span>尚未选择谱线，至少标记 3 条。</span>}</div>
+    <p>系统会优先自动匹配 5 条汞灯谱线；也可选择标准波长后点击照片或候选峰进行修正。</p>
+    {image && <div className="candidate-strip" aria-label="检测到的候选峰">{image.peaks.map((peak, index) => <button key={`${peak.x}-${index}`} onClick={() => onCandidate(peak.xRatio)}><i style={{ background: peak.color }} />峰 {index + 1}<small>{peak.x.toFixed(1)}px</small></button>)}</div>}
+    <div className="selected-markers">{markers.length ? markers.map((marker) => <button key={marker.wavelengthNm} onClick={() => onRemove(marker.wavelengthNm)} title="移除此标记"><i style={{ background: lineColor(marker.wavelengthNm) }} />{marker.wavelengthNm.toFixed(2)} nm<span>×</span></button>) : <span>尚未选择谱线；任务 A 至少需要 4 条，建议完整标记 5 条。</span>}</div>
   </div>;
 }
 
@@ -412,7 +474,7 @@ function ProcessingTimeline({ image, selectedCount, resultText }: { image: Image
 
 function AnalysisModule({ analyzeSignal = 0 }: { analyzeSignal?: number }) {
   const [task, setTask] = useState<"A" | "B">("A");
-  const [detector, setDetector] = useState<DetectorOptions>({ prominence: .035, minDistancePx: 8 });
+  const [detector, setDetector] = useState<DetectorOptions>({ prominence: .018, minDistancePx: 3 });
   const [aSource, setASource] = useState<SpectrumSource | null>(() => analyzeSignal > 0 ? buildSampleSource() : null); const [bReferenceSource, setBReferenceSource] = useState<SpectrumSource | null>(null); const [bUnknownSource, setBUnknownSource] = useState<SpectrumSource | null>(null);
   const [aMarkers, setAMarkers] = useState<ReferenceMarker[]>(() => analyzeSignal > 0 ? SPECTRAL_LIBRARY.mercury.map((line) => ({ wavelengthNm: line.wavelengthNm, xRatio: (100 + 4000 * Math.tan(Math.asin(line.wavelengthNm / 3333))) / 1000 })) : []); const [bMarkers, setBMarkers] = useState<ReferenceMarker[]>([]); const [selectedWavelength, setSelectedWavelength] = useState(546.07);
   const [zeroX, setZeroX] = useState(100); const [scaleL, setScaleL] = useState(4000); const [gratingUm, setGratingUm] = useState(3.333);
@@ -436,10 +498,12 @@ function AnalysisModule({ analyzeSignal = 0 }: { analyzeSignal?: number }) {
     if (!file) return; setBusy(kind);
     try {
       const source = await analyzeImageFile(file);
-      if (kind === "a") { setASource(source); setAMarkers([]); setZeroX(Math.round(source.width / 2)); setAComplete(false); }
-      if (kind === "reference") { setBReferenceSource(source); setBMarkers([]); setBCalibrated(false); setBUnknownComplete(false); setBUnknownSource(null); }
+      const analyzed = detectSpectrumPeaks(source, detector);
+      const automaticMarkers = autoMatchMercuryPeaks(analyzed);
+      if (kind === "a") { setASource(source); setAMarkers(automaticMarkers); setZeroX(Math.round(source.width / 2)); setScaleL(Math.round(source.width * 4)); setAComplete(false); }
+      if (kind === "reference") { setBReferenceSource(source); setBMarkers(automaticMarkers); setBCalibrated(false); setBUnknownComplete(false); setBUnknownSource(null); }
       if (kind === "unknown") { setBUnknownSource(source); setBUnknownComplete(false); setIgnoredUnknown([]); setProfileView("unknown"); }
-      toast.success("图像读取完成，已生成强度曲线和候选峰");
+      toast.success(automaticMarkers.length === 5 ? "已检测并自动匹配 5 条汞灯谱线" : "图像读取完成，请复核并补充参考谱线");
     } catch (error) { toast.error(error instanceof Error ? error.message : "图像分析失败"); }
     finally { setBusy(null); }
   };
@@ -455,11 +519,11 @@ function AnalysisModule({ analyzeSignal = 0 }: { analyzeSignal?: number }) {
   const removeMarker = (wavelengthNm: number) => task === "A" ? setAMarkers((items) => items.filter((item) => item.wavelengthNm !== wavelengthNm)) : setBMarkers((items) => items.filter((item) => item.wavelengthNm !== wavelengthNm));
 
   const aResult = useMemo(() => {
-    if (!aComplete || !aImage || aMarkers.length < 3 || scaleL <= 0) return null;
+    if (!aComplete || !aImage || aMarkers.length < 4) return null;
     try {
-      return measureGrating(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, thetaDeg: Math.abs(Math.atan((marker.xRatio * aImage.width - zeroX) / scaleL) * 180 / Math.PI) })));
+      return fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width })), aImage.width);
     } catch { return null; }
-  }, [aComplete, aImage, aMarkers, zeroX, scaleL]);
+  }, [aComplete, aImage, aMarkers]);
 
   const bCalibration = useMemo(() => {
     if (!bCalibrated || bMarkers.length < 3) return null;
@@ -475,23 +539,23 @@ function AnalysisModule({ analyzeSignal = 0 }: { analyzeSignal?: number }) {
   const bResiduals = bCalibration ? bMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, predicted: bCalibration.predict(marker.xRatio), residual: bCalibration.predict(marker.xRatio) - marker.wavelengthNm })) : [];
   const hasResult = task === "A" ? Boolean(aResult) : Boolean(bCalibration);
   const resultRmse = task === "A" ? aResult?.rmseNm : bCalibration?.rmseNm;
-  const status = !activeImage ? "待上传" : activeMarkers.length < 3 ? "待选线" : hasResult ? "已完成" : "可计算";
+  const status = !activeImage ? "待上传" : activeMarkers.length < (task === "A" ? 4 : 3) ? "待选线" : hasResult ? "已完成" : "可计算";
 
   const runPrimary = () => {
     if (!activeImage) return toast.warning("请先上传光谱照片");
-    if (activeMarkers.length < 3) return toast.warning("至少标记 3 条有效参考谱线");
-    if (task === "A") { if (scaleL <= 0) return toast.warning("成像尺度 L 必须大于 0"); setAComplete(true); }
+    if (activeMarkers.length < (task === "A" ? 4 : 3)) return toast.warning(task === "A" ? "自动几何拟合至少需要 4 条参考谱线，建议使用完整 5 条" : "至少标记 3 条有效参考谱线");
+    if (task === "A") setAComplete(true);
     else setBCalibrated(true);
   };
   const resetTask = () => {
-    setDetector({ prominence: .035, minDistancePx: 8 }); setSelectedWavelength(546.07);
+    setDetector({ prominence: .018, minDistancePx: 3 }); setSelectedWavelength(546.07);
     if (task === "A") { setASource(null); setAMarkers([]); setZeroX(100); setScaleL(4000); setAComplete(false); }
     else { setBReferenceSource(null); setBUnknownSource(null); setBMarkers([]); setGratingUm(3.333); setBCalibrated(false); setBUnknownComplete(false); setIgnoredUnknown([]); }
   };
   const save = async () => {
     if (!hasResult) return;
     const resultValue = task === "A" && aResult ? `${aResult.dUm.toFixed(3)} ± ${aResult.uncertaintyUm.toFixed(3)} μm` : `${unknownResults.length} 条未知谱线`;
-    const payload = task === "A" ? { parameters: { zeroX, scaleL, ...detector }, referenceMarkers: aMarkers, result: aResult, processing: { peaks: aImage?.peaks.length, overexposed: aImage?.overexposed } } : { parameters: { gratingUm, ...detector }, referenceMarkers: bMarkers, calibration: bCalibration ? { x0: bCalibration.x0, L: bCalibration.L, rmseNm: bCalibration.rmseNm } : null, residuals: bResiduals, unknownLines: unknownResults, processing: { referencePeaks: bReferenceImage?.peaks.length, unknownPeaks: bUnknownImage?.peaks.length } };
+    const payload = task === "A" ? { parameters: { initialZeroX: zeroX, initialScaleL: scaleL, fittedZeroX: aResult?.x0, fittedScaleL: aResult?.L, ...detector }, referenceMarkers: aMarkers, result: aResult, processing: { peaks: aImage?.peaks.length, overexposed: aImage?.overexposed } } : { parameters: { gratingUm, ...detector }, referenceMarkers: bMarkers, calibration: bCalibration ? { x0: bCalibration.x0, L: bCalibration.L, rmseNm: bCalibration.rmseNm } : null, residuals: bResiduals, unknownLines: unknownResults, processing: { referencePeaks: bReferenceImage?.peaks.length, unknownPeaks: bUnknownImage?.peaks.length } };
     try { const response = await fetch("/api/records", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task, source: task === "A" ? "汞灯" : "未知光源", resultLabel: task === "A" ? "光栅常数 d" : "未知波长 λ", resultValue, quality: (activeImage?.overexposed || (resultRmse ?? 0) > 1.5) ? "需复核" : "优秀", payload }) }); if (!response.ok) throw new Error(); toast.success("本次实验已保存，可在实验记录中回放"); } catch { toast.error("记录服务暂不可用，当前结果仍保留在页面中"); }
   };
 
@@ -505,24 +569,26 @@ function AnalysisModule({ analyzeSignal = 0 }: { analyzeSignal?: number }) {
   return <div className="module-page analysis-page">
     <PageHeading eyebrow="实验 · 图像分析工作台" title="从光谱照片到可复核的测量结果。" description="调整检测参数、标记参考谱线，再沿强度曲线、拟合残差和处理过程检查每一步。" action={<Tabs value={task} onValueChange={(value) => setTask(value as "A" | "B")}><TabsList className="task-switch"><TabsTrigger value="A"><span>A</span>测光栅常数 d</TabsTrigger><TabsTrigger value="B"><span>B</span>测未知波长 λ</TabsTrigger></TabsList></Tabs>} />
     <div className="analysis-workbench">
-      <aside className="panel parameter-panel"><div className="analysis-card-heading"><span><SlidersHorizontal size={18} /></span><div><h2>{task === "A" ? "测量参数" : "标定参数"}</h2><p>{task === "A" ? "由像素位置换算衍射角。" : "d 作为已知约束，不参与反演。"}</p></div></div><div className="parameter-form">
-        {task === "A" ? <><label>零级位置 x₀（px）<input type="number" min="0" max={aImage?.width ?? 1200} value={zeroX} onChange={(event) => setZeroX(Number(event.target.value))} /></label><label>等效成像尺度 L（px/rad）<input type="number" min="1" step="10" value={scaleL} onChange={(event) => setScaleL(Number(event.target.value))} /></label></> : <label>光栅常数 d（μm）<input type="number" min=".1" step=".001" value={gratingUm} onChange={(event) => setGratingUm(Number(event.target.value))} /></label>}
+      <aside className="panel parameter-panel"><div className="analysis-card-heading"><span><SlidersHorizontal size={18} /></span><div><h2>{task === "A" ? "测量参数" : "标定参数"}</h2><p>{task === "A" ? "由全部参考线联合优化 x₀、L 与 d。" : "d 作为已知约束，不参与反演。"}</p></div></div><div className="parameter-form">
+        {task === "A" ? <><label>零级位置 x₀（自动优化）<input type="number" value={aResult ? Number(aResult.x0.toFixed(1)) : zeroX} onChange={(event) => setZeroX(Number(event.target.value))} disabled={Boolean(aResult)} /></label><label>成像尺度 L（自动优化）<input type="number" min="1" step="10" value={aResult ? Number(aResult.L.toFixed(1)) : scaleL} onChange={(event) => setScaleL(Number(event.target.value))} disabled={Boolean(aResult)} /></label></> : <label>光栅常数 d（μm）<input type="number" min=".1" step=".001" value={gratingUm} onChange={(event) => setGratingUm(Number(event.target.value))} /></label>}
         <label>峰值突出度 <output>{detector.prominence.toFixed(3)}</output><input type="range" min=".005" max=".2" step=".005" value={detector.prominence} onChange={(event) => setDetector((value) => ({ ...value, prominence: Number(event.target.value) }))} /></label>
         <label>最小峰间距（px）<input type="number" min="2" max="64" value={detector.minDistancePx} onChange={(event) => setDetector((value) => ({ ...value, minDistancePx: Math.min(64, Math.max(2, Number(event.target.value))) }))} /></label>
         <div className="parameter-buttons"><button className="reset-button parameter-reset" onClick={resetTask}><RotateCcw size={15} />恢复默认</button>{task === "A" && <button className="reset-button parameter-reset sample-button" onClick={loadSample}><Play size={15} />加载示例</button>}</div>
       </div></aside>
-      <section className="panel calibration-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>{task === "A" ? "光栅常数反演" : "汞灯参考标定"}</h2><p>{task === "A" ? "上传一级汞灯光谱，用 x₀/L 将谱线位置换算为衍射角。" : "上传汞灯参考照片，拟合有效参数 x₀ 与 L。"}</p></div><em className={`analysis-status ${status === "已完成" ? "done" : ""}`}>{status}</em></div>
+      <section className="panel calibration-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>{task === "A" ? "光栅常数反演" : "汞灯参考标定"}</h2><p>{task === "A" ? "高分辨率保留黄双线，并从全部标记联合拟合 x₀、L 与 d。" : "上传汞灯参考照片，拟合有效参数 x₀ 与 L。"}</p></div><em className={`analysis-status ${status === "已完成" ? "done" : ""}`}>{status}</em></div>
         <SpectrumStage image={activeImage} markers={activeMarkers} onMark={addMarker} caption={activeImage?.sample ? "示例图像 · 一级汞灯光谱" : "参考图像 · 已完成强度提取"} />
         <MarkerPicker selected={selectedWavelength} setSelected={setSelectedWavelength} markers={activeMarkers} onClear={() => task === "A" ? setAMarkers([]) : setBMarkers([])} onRemove={removeMarker} image={activeImage} onCandidate={addMarker} />
         <div className="analysis-actions"><label className="upload-button"><Upload size={17} />上传照片<input type="file" accept="image/*" hidden onChange={(event) => upload(task === "A" ? "a" : "reference", event.target.files?.[0])} /></label><label className="camera-button"><Camera size={17} />手机拍摄<input type="file" accept="image/*" capture="environment" hidden onChange={(event) => upload(task === "A" ? "a" : "reference", event.target.files?.[0])} /></label><button className="analyze-button" disabled={Boolean(busy)} onClick={runPrimary}><Play size={17} />{busy ? "处理中…" : task === "A" ? "执行测量" : "执行标定"}</button></div>
         {activeImage && <div className="quality-row"><span><i />谱带宽度 {activeImage.bandWidth}px</span><span><i />候选峰 {activeImage.peaks.length} 条</span><span><i className={activeImage.overexposed ? "warn" : ""} />{activeImage.overexposed ? "高光偏多，建议降低曝光" : "曝光正常"}</span></div>}
+        {task === "A" && aImage && aImage.peaks.length < 5 && <p className="inline-warning"><CircleAlert size={15} />当前只检测到 {aImage.peaks.length} 条候选峰；请降低突出度或确认黄双线清晰可分。</p>}
+        {task === "A" && aResult && aResult.rmseNm > 2 && <p className="inline-warning"><CircleAlert size={15} />拟合 RMSE 为 {aResult.rmseNm.toFixed(2)} nm，疑似参考线配对错误，请复核标记后重新执行。</p>}
         {task === "B" && bCalibration && <div className="unknown-stage-block"><div><span className="step-index">02</span><div><h3>未知光谱分析</h3><p>保持相同机位、焦距、方向和裁剪，再上传未知光源照片。</p></div></div><SpectrumStage image={bUnknownImage} caption="未知光谱 · 候选峰已检测" /><div className="analysis-actions"><label className="upload-button"><Upload size={17} />上传未知光谱<input type="file" accept="image/*" hidden onChange={(event) => upload("unknown", event.target.files?.[0])} /></label><button className="analyze-button" disabled={!bUnknownImage || Boolean(busy) || !bAspectOkay} onClick={() => { setBUnknownComplete(true); setProfileView("unknown"); }}><ScanLine size={17} />分析未知谱线</button></div>{bUnknownImage && !bAspectOkay && <p className="inline-warning"><CircleAlert size={15} />两张照片画幅比例差异超过 3%，请使用相同拍摄设置重新拍摄。</p>}</div>}
       </section>
     </div>
     <section className="panel overview-panel"><div><h2>结果总览</h2><p>{hasResult ? "关键参数、最终结果与残差已同步更新。" : "完成参考谱线标记并执行计算后，这里会汇总本次结果。"}</p></div><div className="overview-metrics">{summary.map(([label, value]) => <span key={label}><small>{label}</small><strong>{value}</strong></span>)}</div>{hasResult && <button className="secondary-action" onClick={save}><Save size={16} />保存记录</button>}</section>
     <div className="analysis-results-grid">
       <section className="panel intensity-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>强度剖面与谱线标注</h2><p>曲线、候选峰和人工参考标记来自当前图像数据。</p></div>{task === "B" && bUnknownImage && <div className="profile-switch"><button className={profileView === "reference" ? "active" : ""} onClick={() => setProfileView("reference")}>汞灯参考</button><button className={profileView === "unknown" ? "active" : ""} onClick={() => setProfileView("unknown")}>未知光谱</button></div>}</div><IntensityChart image={visibleProfile} markers={task === "B" && profileView === "unknown" ? [] : activeMarkers} title="光谱横向强度剖面" /></section>
-      <div className="analysis-result-stack"><section className="panel final-result-card"><div className="analysis-card-heading"><span><BarChart3 size={18} /></span><div><h2>{task === "A" ? "最终光栅结果" : "最终波长结果"}</h2><p>{task === "A" ? "像素换算与多线拟合结果。" : "列出未知图中的有效候选谱线。"}</p></div></div>{task === "A" ? aResult ? <div className="final-measure"><small>光栅常数 d</small><strong>{aResult.dUm.toFixed(3)} <em>± {aResult.uncertaintyUm.toFixed(3)} μm</em></strong><p>{aResult.linesPerMm.toFixed(1)} 线/mm · 标称偏差 {Math.abs(aResult.nominalDeviationPercent).toFixed(2)}%</p></div> : <div className="result-placeholder"><FlaskConical size={28} /><span>等待执行测量</span></div> : unknownResults.length ? <div className="unknown-results">{unknownResults.map((item) => <div key={item.index}><i style={{ background: bUnknownImage?.peaks[item.index]?.color }} /><span><strong>{item.wavelengthNm.toFixed(1)} nm</strong><small>x = {item.x}px · ±{item.uncertaintyNm.toFixed(1)} nm</small></span><em className={item.status === "外推" ? "warning" : ""}>{item.status}</em><button aria-label={`忽略 ${item.wavelengthNm.toFixed(1)} nm 谱线`} onClick={() => setIgnoredUnknown((items) => [...items, item.index])}>×</button></div>)}</div> : <div className="result-placeholder"><FlaskConical size={28} /><span>{bCalibration ? "等待上传并分析未知光谱" : "等待完成汞灯标定"}</span></div>}</section>
+      <div className="analysis-result-stack"><section className="panel final-result-card"><div className="analysis-card-heading"><span><BarChart3 size={18} /></span><div><h2>{task === "A" ? "最终光栅结果" : "最终波长结果"}</h2><p>{task === "A" ? "亚像素定位与联合几何拟合结果。" : "列出未知图中的有效候选谱线。"}</p></div></div>{task === "A" ? aResult ? <div className="final-measure"><small>光栅常数 d</small><strong>{aResult.dUm.toFixed(3)} <em>± {aResult.uncertaintyUm.toFixed(3)} μm</em></strong><p>{aResult.linesPerMm.toFixed(1)} 线/mm · RMSE {aResult.rmseNm.toFixed(3)} nm</p><p>拟合 x₀ = {aResult.x0.toFixed(1)} px · L = {aResult.L.toFixed(1)} px/rad</p></div> : <div className="result-placeholder"><FlaskConical size={28} /><span>等待执行测量</span></div> : unknownResults.length ? <div className="unknown-results">{unknownResults.map((item) => <div key={item.index}><i style={{ background: bUnknownImage?.peaks[item.index]?.color }} /><span><strong>{item.wavelengthNm.toFixed(1)} nm</strong><small>x = {item.x}px · ±{item.uncertaintyNm.toFixed(1)} nm</small></span><em className={item.status === "外推" ? "warning" : ""}>{item.status}</em><button aria-label={`忽略 ${item.wavelengthNm.toFixed(1)} nm 谱线`} onClick={() => setIgnoredUnknown((items) => [...items, item.index])}>×</button></div>)}</div> : <div className="result-placeholder"><FlaskConical size={28} /><span>{bCalibration ? "等待上传并分析未知光谱" : "等待完成汞灯标定"}</span></div>}</section>
         <section className="panel residual-card"><div className="analysis-card-heading"><span><Target size={18} /></span><div><h2>{task === "A" ? "拟合残差复核" : "标定残差复核"}</h2><p>逐条检查预测值与参考值。</p></div></div>{task === "A" && aResult ? <div className="residual-table"><div><b>标准 λ</b><b>换算 θ</b><b>残差</b></div>{aResult.points.map((point) => <div key={point.wavelengthNm}><span>{point.wavelengthNm.toFixed(2)} nm</span><span>{point.thetaDeg.toFixed(3)}°</span><strong>{point.residualNm >= 0 ? "+" : ""}{point.residualNm.toFixed(3)} nm</strong></div>)}</div> : task === "B" && bResiduals.length ? <div className="residual-table"><div><b>标准 λ</b><b>预测 λ</b><b>残差</b></div>{bResiduals.map((item) => <div key={item.wavelengthNm}><span>{item.wavelengthNm.toFixed(2)}</span><span>{item.predicted.toFixed(2)}</span><strong>{item.residual >= 0 ? "+" : ""}{item.residual.toFixed(3)} nm</strong></div>)}</div> : <div className="result-placeholder compact"><Target size={25} /><span>完成计算后显示逐线残差</span></div>}</section></div>
     </div>
     <section className="panel process-panel"><div className="analysis-card-heading wide"><span><SlidersHorizontal size={18} /></span><div><h2>图像处理全过程</h2><p>从原始照片到物理结果，每一步都保留可复核的实际数据。</p></div></div><ProcessingTimeline image={task === "A" ? aImage : bReferenceImage} selectedCount={activeMarkers.length} resultText={task === "A" && aResult ? `d = ${aResult.dUm.toFixed(3)} μm` : bCalibration ? `RMSE ${bCalibration.rmseNm.toFixed(3)} nm` : "等待执行计算"} /></section>
@@ -530,12 +596,12 @@ function AnalysisModule({ analyzeSignal = 0 }: { analyzeSignal?: number }) {
 }
 
 const guideSteps = [
-  { title: "调光路", detail: "调节狭缝、平行光管和望远镜，使叉丝、狭缝像与谱线清晰且无视差。", check: "上下移动眼睛，叉丝与狭缝像不应相对移动。" },
-  { title: "找零级", detail: "望远镜对准中央零级像，记录左右游标初始读数，作为角度参考。", check: "零级像位于叉丝竖线中央。" },
-  { title: "逐线瞄准", detail: "从短波到长波依次转动望远镜，黄双线必须分开对准。", check: "每条谱线至少重复瞄准两次。" },
-  { title: "读数", detail: "主尺读整度，游标读分；左右游标相差应接近 180°，注意越零处理。", check: "读数后立即记录，不凭记忆补填。" },
-  { title: "计算", detail: "以左右位置的半差求衍射角，再用 λ=d·sinθ 过原点加权拟合。", check: "先检查单位：nm、μm 与弧度。" },
-  { title: "不确定度", detail: "合成波长、角分度与重复测量分量，报告扩展不确定度 U，k=2。", check: "结果写成 d ± U，并保留相同小数位。" },
+  { title: "调光路", detail: "调节狭缝、平行光管和望远镜，使叉丝、狭缝像与谱线清晰且无视差。", check: "上下移动眼睛，叉丝与狭缝像不应相对移动。", image: "/guide/01-align-optics.jpg", alt: "实验人员正在调节分光计的望远镜、载物台与棱镜", position: "center 42%", credit: "SAHAYA RAJAN S · CC0", source: "https://commons.wikimedia.org/wiki/File:Spectrometer_prism_table.jpg" },
+  { title: "找零级", detail: "望远镜对准中央零级像，记录左右游标初始读数，作为角度参考。", check: "零级像位于叉丝竖线中央。", image: "/guide/02-zero-order.jpg", alt: "物理实验室中的光学实验台组件与叉丝靶", position: "center 48%", credit: "Waifer X · CC BY 2.0", source: "https://commons.wikimedia.org/wiki/File:Optical_Bench_educational_Kit_-_Cuesta_College.jpg" },
+  { title: "逐线瞄准", detail: "从短波到长波依次转动望远镜，黄双线必须分开对准。", check: "每条谱线至少重复瞄准两次。", image: "/guide/03-aim-lines.jpg", alt: "实验室光栅产生的真实可见光谱", position: "center 47%", credit: "NOIRLab / NSF / AURA · CC BY 4.0", source: "https://commons.wikimedia.org/wiki/File:Diffraction_grating_(noao-02613).jpg" },
+  { title: "读数", detail: "主尺读整度，游标读分；左右游标相差应接近 180°，注意越零处理。", check: "读数后立即记录，不凭记忆补填。", image: "/guide/04-read-vernier.jpg", alt: "分光计主尺与游标的实拍特写", position: "center 47%", credit: "Neakhu · CC BY-SA 3.0", source: "https://commons.wikimedia.org/wiki/File:Physics_019.jpg" },
+  { title: "计算", detail: "以左右位置的半差求衍射角，再用 λ=d·sinθ 过原点加权拟合。", check: "先检查单位：nm、μm 与弧度。", image: "/guide/05-calculate.jpg", alt: "实验室电脑中正在计算数据并绘制拟合曲线", position: "center 44%", credit: "MikeRun · CC BY-SA 4.0", source: "https://commons.wikimedia.org/wiki/File:Lab-notebook-spreadsheet-simulation.jpg" },
+  { title: "不确定度", detail: "合成波长、角分度与重复测量分量，报告扩展不确定度 U，k=2。", check: "结果写成 d ± U，并保留相同小数位。", image: "/guide/06-uncertainty.jpg", alt: "两位实验人员对照图表复核分析结果", position: "center 52%", credit: "Linda Bartlett / NCI · Public domain", source: "https://commons.wikimedia.org/wiki/File:Scientists_examine_a_graph.jpg" },
 ];
 
 function GuideModule() {
@@ -543,7 +609,7 @@ function GuideModule() {
   const current = guideSteps[step];
   return <div className="module-page"><PageHeading eyebrow="实验 · 分步引导" title="每完成一步，都留下一个可检查的证据。" description="按真实实验顺序推进；点击“完成并继续”后，当前步骤会写入进度。" />
     <div className="guide-grid"><aside className="panel step-list">{guideSteps.map((item, index) => <button key={item.title} className={`${step === index ? "active" : ""} ${done.includes(index) ? "done" : ""}`} onClick={() => setStep(index)}><span>{done.includes(index) ? <Check size={16} /> : index + 1}</span><div><strong>{item.title}</strong><small>{index === step ? "正在进行" : done.includes(index) ? "已完成" : "待完成"}</small></div><ChevronRight size={16} /></button>)}</aside>
-      <section className="panel guide-detail"><div className="guide-visual"><div className="guide-icon">{step < 2 ? <Telescope size={38} /> : step < 4 ? <Target size={38} /> : <BarChart3 size={38} />}</div><span>STEP {String(step + 1).padStart(2, "0")}</span></div><div className="guide-copy"><p className="eyebrow">当前步骤</p><h2>{current.title}</h2><p>{current.detail}</p><div className="checkpoint"><ClipboardCheck size={19} /><div><strong>检查点</strong><span>{current.check}</span></div></div><div className="guide-actions"><button className="secondary-action" disabled={step === 0} onClick={() => setStep((value) => Math.max(0, value - 1))}><ArrowLeft size={16} />上一步</button><button className="primary-action" onClick={() => { setDone((items) => [...new Set([...items, step])]); if (step < 5) setStep(step + 1); else toast.success("实验流程已完成，可以进入记录复盘"); }}>完成并继续<ArrowRight size={16} /></button></div></div></section>
+      <section className="panel guide-detail"><figure className="guide-visual"><Image key={current.image} src={current.image} alt={current.alt} fill priority={step === 0} sizes="(max-width: 1100px) 100vw, 50vw" style={{ objectPosition: current.position }} /><div className="guide-photo-shade" aria-hidden="true" /><span>STEP {String(step + 1).padStart(2, "0")}</span><figcaption><span>真实实验照片</span><a href={current.source} target="_blank" rel="noreferrer">{current.credit}</a></figcaption></figure><div className="guide-copy"><p className="eyebrow">当前步骤</p><h2>{current.title}</h2><p>{current.detail}</p><div className="checkpoint"><ClipboardCheck size={19} /><div><strong>检查点</strong><span>{current.check}</span></div></div><div className="guide-actions"><button className="secondary-action" disabled={step === 0} onClick={() => setStep((value) => Math.max(0, value - 1))}><ArrowLeft size={16} />上一步</button><button className="primary-action" onClick={() => { setDone((items) => [...new Set([...items, step])]); if (step < 5) setStep(step + 1); else toast.success("实验流程已完成，可以进入记录复盘"); }}>完成并继续<ArrowRight size={16} /></button></div></div></section>
       <aside className="panel guide-side"><div><Lightbulb size={20} /><strong>本步为什么重要？</strong><p>{["光路未调好会让谱线变宽，后续认线再准确也无法弥补。", "零级偏移会让所有谱线产生同方向系统误差。", "固定顺序可以避免认错线，尤其是黄色双线。", "游标读数是任务 A 的角度来源，图像不替代学生读数。", "多线拟合比逐线平均更能利用全部证据。", "不确定度说明结果可信到什么程度，不是装饰项。"][step]}</p></div><div className="progress-block"><span>实验进度 <strong>{Math.round(done.length / 6 * 100)}%</strong></span><Progress value={done.length / 6 * 100} /></div></aside></div>
   </div>;
 }

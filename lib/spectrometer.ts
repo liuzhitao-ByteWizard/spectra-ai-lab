@@ -4,6 +4,11 @@ export type MeasurementLine = {
   label?: string;
 };
 
+export type PixelReferenceLine = {
+  wavelengthNm: number;
+  x: number;
+};
+
 export type SpectrumLine = {
   wavelengthNm: number;
   color: string;
@@ -80,6 +85,80 @@ export function measureGrating(
       residualNm: residuals[index],
     })),
   };
+}
+
+/**
+ * Jointly fits the zero-order position, image scale and grating constant from
+ * pixel locations.  The zero order is deliberately allowed outside the crop:
+ * many phone photos contain only one side of the first-order spectrum.
+ */
+export function fitGratingFromPixels(
+  references: PixelReferenceLine[],
+  imageWidth: number,
+) {
+  const valid = references.filter(
+    (line) => Number.isFinite(line.x) && Number.isFinite(line.wavelengthNm) && line.wavelengthNm > 0,
+  );
+  if (valid.length < 4) throw new Error("自动几何拟合至少需要 4 条有效参考谱线");
+
+  const width = Math.max(100, imageWidth);
+  const evaluate = (x0: number, L: number) => {
+    const sines = valid.map((line) => {
+      const delta = Math.abs(line.x - x0);
+      return delta / Math.sqrt(L * L + delta * delta);
+    });
+    const denominator = sines.reduce((sum, value) => sum + value * value, 0);
+    if (denominator < 1e-12) return { score: Number.POSITIVE_INFINITY, dNm: 0 };
+    const dNm = valid.reduce((sum, line, index) => sum + line.wavelengthNm * sines[index], 0) / denominator;
+    if (!Number.isFinite(dNm) || dNm < 1_000 || dNm > 8_000) return { score: Number.POSITIVE_INFINITY, dNm };
+    const squared = valid.reduce((sum, line, index) => {
+      const residual = line.wavelengthNm - dNm * sines[index];
+      return sum + residual * residual;
+    }, 0);
+    return { score: Math.sqrt(squared / valid.length), dNm };
+  };
+
+  let best = { x0: width / 2, L: width * 4, score: Number.POSITIVE_INFINITY, dNm: 3333 };
+  const minL = width * 0.4;
+  // A camera FOV cannot support an arbitrarily large px/rad scale. Keeping a
+  // realistic interval also removes the near-linear d/L degeneracy of a
+  // one-sided crop instead of reporting a tiny residual with an absurd d.
+  const maxL = width * 8;
+  const optimizeScale = (x0: number) => {
+    let lo = Math.log(minL), hi = Math.log(maxL);
+    for (let iteration = 0; iteration < 48; iteration++) {
+      const left = lo + (hi - lo) / 3;
+      const right = hi - (hi - lo) / 3;
+      if (evaluate(x0, Math.exp(left)).score <= evaluate(x0, Math.exp(right)).score) hi = right;
+      else lo = left;
+    }
+    const L = Math.exp((lo + hi) / 2);
+    return { x0, L, ...evaluate(x0, L) };
+  };
+
+  // Global search over x₀ with an independently optimized scale at every
+  // position. This follows the narrow coupled x₀/L valley that defeated the
+  // former fixed-geometry and simple coordinate-search approaches.
+  const coarseStep = (5 * width) / 800;
+  for (let xi = 0; xi <= 800; xi++) {
+    const candidate = optimizeScale(-2 * width + coarseStep * xi);
+    if (candidate.score < best.score) best = candidate;
+  }
+  let xStep = coarseStep;
+  for (let round = 0; round < 10; round++) {
+    const candidates = [-1, -.5, 0, .5, 1].map((offset) => optimizeScale(
+      Math.min(3 * width, Math.max(-2 * width, best.x0 + offset * xStep)),
+    ));
+    best = candidates.reduce((winner, candidate) => candidate.score < winner.score ? candidate : winner, best);
+    xStep *= .3;
+  }
+
+  if (!Number.isFinite(best.score)) throw new Error("参考线位置无法形成有效的光栅模型");
+  const measurement = measureGrating(valid.map((line) => ({
+    wavelengthNm: line.wavelengthNm,
+    thetaDeg: radToDeg(Math.atan(Math.abs(line.x - best.x0) / best.L)),
+  })));
+  return { ...measurement, x0: best.x0, L: best.L };
 }
 
 export function calibrateSpectrum(

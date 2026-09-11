@@ -269,10 +269,14 @@ h1 { margin: 0; max-width: 760px; font-size: clamp(25px, 3vw, 38px); line-height
 .step-list button.done > span { color: #21804b; border-color: #bee5ce; background: #eaf8f0; }
 .step-list strong { display: block; font-size: 14px; } .step-list small { display: block; margin-top: 3px; color: #7f8fa1; font-size: 12px; }
 .guide-detail { overflow: hidden; }
-.guide-visual { min-height: 235px; position: relative; display: grid; place-items: center; background: radial-gradient(circle at center, #173b65, #0a1d34 63%, #071628); }
-.guide-visual::before { content: ""; width: 70%; height: 1px; position: absolute; top: 50%; background: linear-gradient(90deg, transparent, #67a6ee80, transparent); box-shadow: 0 0 35px #67a6ee; }
-.guide-icon { width: 105px; height: 105px; z-index: 2; display: grid; place-items: center; border: 1px solid #6c9dd05f; border-radius: 50%; color: #cbe3ff; background: #15375cb5; box-shadow: 0 0 50px #2a6db45e; }
-.guide-visual > span { position: absolute; left: 18px; top: 16px; color: #88a8c7; font-size: 12px; letter-spacing: .1em; }
+.guide-visual { min-height: 300px; position: relative; margin: 0; overflow: hidden; background: #071628; }
+.guide-visual img { object-fit: cover; transition: opacity .25s ease; }
+.guide-photo-shade { position: absolute; z-index: 1; inset: 0; pointer-events: none; background: linear-gradient(180deg, #0313229e 0, transparent 35%, transparent 58%, #031322c7 100%); }
+.guide-visual > span { position: absolute; z-index: 2; left: 18px; top: 16px; padding: 6px 9px; color: #dceeff; background: #07182dbd; border: 1px solid #c7e3ff47; border-radius: 7px; backdrop-filter: blur(8px); font-size: 12px; letter-spacing: .1em; }
+.guide-visual figcaption { position: absolute; z-index: 2; left: 18px; right: 18px; bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #eaf5ff; font-size: 12px; text-shadow: 0 1px 3px #000; }
+.guide-visual figcaption > span { padding: 5px 8px; color: #d9ecff; background: #0b2846b8; border-radius: 999px; backdrop-filter: blur(7px); }
+.guide-visual figcaption a { overflow: hidden; color: #dceaff; opacity: .82; text-overflow: ellipsis; white-space: nowrap; }
+.guide-visual figcaption a:hover { opacity: 1; text-decoration: underline; }
 .guide-copy { padding: 25px; }
 .guide-copy h2 { margin: 0; font-size: 26px; } .guide-copy > p:not(.eyebrow) { color: #566d84; font-size: 16px; line-height: 1.8; }
 .checkpoint { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; padding: 13px; border: 1px solid #cfe0f2; border-radius: 11px; color: #1c6ccd; background: #eff6ff; }
