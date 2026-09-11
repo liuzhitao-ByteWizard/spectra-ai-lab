@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
     return Response.json(
-      { error: "AI 助教尚未配置 DeepSeek API Key" },
+      { error: "AI 助教尚未配置服务密钥" },
       { status: 503 },
     );
   }
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     } catch {
       if (attempt === 0) continue;
       return Response.json(
-        { error: "连接 DeepSeek 超时，请稍后重试" },
+        { error: "AI 服务响应超时，请稍后重试" },
         { status: 504 },
       );
     }
@@ -83,19 +83,19 @@ export async function POST(request: Request) {
   }
 
   if (!response) {
-    return Response.json({ error: "DeepSeek 服务暂时不可用" }, { status: 502 });
+    return Response.json({ error: "AI 服务暂时不可用" }, { status: 502 });
   }
 
   let data: DeepSeekResponse = {};
   try {
     data = (await response.json()) as DeepSeekResponse;
   } catch {
-    return Response.json({ error: "DeepSeek 返回了无效响应，请稍后重试" }, { status: 502 });
+    return Response.json({ error: "AI 服务返回了无效响应，请稍后重试" }, { status: 502 });
   }
   if (!response.ok) {
     console.error("DeepSeek API request failed", response.status, data.error?.message);
     return Response.json(
-      { error: "DeepSeek 服务暂时不可用，请检查密钥、余额或稍后重试" },
+      { error: "AI 服务暂时不可用，请稍后重试" },
       { status: 502 },
     );
   }
@@ -104,14 +104,14 @@ export async function POST(request: Request) {
   const answer = content ? normalizeAnswer(content) : "";
   if (!answer) {
     return Response.json(
-      { error: "DeepSeek 没有返回有效答案，请换一种问法" },
+      { error: "AI 助教没有返回有效答案，请换一种问法" },
       { status: 502 },
     );
   }
 
   return Response.json({
     answer,
-    sources: ["DeepSeek · 通用 AI 助手"],
+    sources: ["AI 助教 · 物理实验与通用问答"],
     offline: false,
   });
 }
