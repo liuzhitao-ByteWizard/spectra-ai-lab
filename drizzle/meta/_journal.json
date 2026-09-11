@@ -15,6 +15,13 @@
       "when": 1788948270111,
       "tag": "0001_fantastic_sunset_bain",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789137876048,
+      "tag": "0002_chief_microbe",
+      "breakpoints": true
     }
   ]
 }
