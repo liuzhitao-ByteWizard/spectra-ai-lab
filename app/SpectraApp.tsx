@@ -79,12 +79,20 @@ function smoothIntensity(values: number[], radius = 1) {
 function classifyPeakColor(source: SpectrumSource, x: number) {
   const index = Math.round(x);
   const radius = 14;
-  const sideIndexes = Array.from({ length: radius * 2 }, (_, offset) => index - radius + offset)
-    .filter((sample) => sample >= 0 && sample < source.width && Math.abs(sample - index) > 2);
-  const background = (channel: number[]) => sideIndexes.reduce((sum, sample) => sum + (channel[sample] ?? 0), 0) / Math.max(sideIndexes.length, 1);
-  const r = Math.max(0, (source.red[index] ?? 0) - background(source.red));
-  const g = Math.max(0, (source.green[index] ?? 0) - background(source.green));
-  const b = Math.max(0, (source.blue[index] ?? 0) - background(source.blue));
+  const leftIndexes = Array.from({ length: radius - 3 }, (_, offset) => index - radius + offset)
+    .filter((sample) => sample >= 0 && sample < source.width);
+  const rightIndexes = Array.from({ length: radius - 3 }, (_, offset) => index + 4 + offset)
+    .filter((sample) => sample >= 0 && sample < source.width);
+  const mean = (channel: number[], indexes: number[]) => indexes.reduce((sum, sample) => sum + (channel[sample] ?? 0), 0) / Math.max(indexes.length, 1);
+  // Use the cleaner side as background. Averaging both sides lets a close
+  // neighbour contaminate colour estimation and can turn a yellow line green.
+  const background = (channel: number[]) => Math.min(mean(channel, leftIndexes), mean(channel, rightIndexes));
+  const core = (channel: number[]) => [index - 1, index, index + 1]
+    .filter((sample) => sample >= 0 && sample < source.width)
+    .reduce((sum, sample) => sum + (channel[sample] ?? 0), 0) / 3;
+  const r = Math.max(0, core(source.red) - background(source.red));
+  const g = Math.max(0, core(source.green) - background(source.green));
+  const b = Math.max(0, core(source.blue) - background(source.blue));
   return r + g + b > 2 ? classifyColor(r, g, b) : classifyColor(source.red[index] ?? 0, source.green[index] ?? 0, source.blue[index] ?? 0);
 }
 
@@ -127,15 +135,14 @@ function detectSpectrumPeaks(source: SpectrumSource, options: DetectorOptions): 
     const near = selected.find((item) => Math.abs(item.x - candidate.x) < minDistance);
     if (!near) selected.push(candidate);
     else {
-      const first = classifyPeakColor(source, near.x);
-      const second = classifyPeakColor(source, candidate.x);
       const lo = Math.ceil(Math.min(near.x, candidate.x));
       const hi = Math.floor(Math.max(near.x, candidate.x));
       const valley = smooth.slice(lo, hi + 1).reduce((minimum, value) => Math.min(minimum, value), Number.POSITIVE_INFINITY);
       const separated = Math.min(near.score, candidate.score) - valley > Math.max(.003, requiredProminence * .18);
-      // A resolved yellow doublet is physically meaningful and must not be
-      // discarded merely because its pixel spacing is below the generic NMS.
-      if (first.family === "yellow" && second.family === "yellow" && separated) selected.push(candidate);
+      // Resolved close lines are meaningful in every colour family. Generic
+      // NMS must suppress duplicate noise peaks, not merge a real doublet.
+      const plausibleWidths = near.widthPx >= 1.5 && candidate.widthPx >= 1.5;
+      if (separated && plausibleWidths) selected.push(candidate);
     }
     if (selected.length === 16) break;
   }
