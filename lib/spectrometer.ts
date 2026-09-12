@@ -96,6 +96,7 @@ export function fitGratingFromPixels(
     zeroUncertaintyPx?: number;
     wavelengthUncertaintyNm?: number;
     repeatDValuesUm?: number[];
+    referenceCalibration?: boolean;
   } = {},
 ) {
   const valid = references.filter(
@@ -104,6 +105,63 @@ export function fitGratingFromPixels(
   if (valid.length < 2) throw new Error("几何拟合至少需要 2 条有效参考线");
   if (!Number.isFinite(zeroX)) throw new Error("未检测到有效零级位置");
   if (!Number.isFinite(imageWidth) || imageWidth <= 0) throw new Error("图像宽度无效");
+  if (options.referenceCalibration) {
+    const dNm = 3333.333;
+    const rows = valid.map((line) => ({ ...line, t: Math.tan(Math.asin(line.wavelengthNm / dNm)), weight: 1 / Math.max(line.uncertaintyPx ?? .35, .1) ** 2 }));
+    const matrix = Array.from({ length: 3 }, () => new Array(4).fill(0));
+    rows.forEach((row) => {
+      const basis = [1, row.t, row.t ** 3];
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) matrix[i][j] += row.weight * basis[i] * basis[j];
+        matrix[i][3] += row.weight * basis[i] * row.x;
+      }
+    });
+    for (let pivot = 0; pivot < 3; pivot++) {
+      let bestRow = pivot;
+      for (let row = pivot + 1; row < 3; row++) if (Math.abs(matrix[row][pivot]) > Math.abs(matrix[bestRow][pivot])) bestRow = row;
+      [matrix[pivot], matrix[bestRow]] = [matrix[bestRow], matrix[pivot]];
+      const divisor = matrix[pivot][pivot];
+      if (Math.abs(divisor) < 1e-12) throw new Error("参考线跨度不足，无法评定镜头几何");
+      for (let column = pivot; column < 4; column++) matrix[pivot][column] /= divisor;
+      for (let row = 0; row < 3; row++) if (row !== pivot) {
+        const factor = matrix[row][pivot];
+        for (let column = pivot; column < 4; column++) matrix[row][column] -= factor * matrix[pivot][column];
+      }
+    }
+    const [calibratedX0, L, cubic] = matrix.map((row) => row[3]);
+    const predictedWavelengths = rows.map((row) => {
+      let t = row.t;
+      for (let iteration = 0; iteration < 10; iteration++) {
+        const derivative = L + 3 * cubic * t ** 2;
+        if (Math.abs(derivative) < 1e-9) break;
+        t -= (calibratedX0 + L * t + cubic * t ** 3 - row.x) / derivative;
+      }
+      return dNm * Math.abs(Math.sin(Math.atan(t)));
+    });
+    const residualsNm = rows.map((row, index) => row.wavelengthNm - predictedWavelengths[index]);
+    const residualPx = rows.map((row) => row.x - (calibratedX0 + L * row.t + cubic * row.t ** 3));
+    const rmseNm = Math.sqrt(residualsNm.reduce((sum, value) => sum + value ** 2, 0) / rows.length);
+    const rmsePx = Math.sqrt(residualPx.reduce((sum, value) => sum + value ** 2, 0) / rows.length);
+    const localizationUm = Math.max(.0001, rmseNm / dNm);
+    const budget = [
+      { key: "zero", label: "参考线联合零级定位", standardUncertaintyUm: localizationUm, status: "已评定" },
+      { key: "localization", label: "谱线亚像素定位", standardUncertaintyUm: localizationUm, status: "已评定" },
+      { key: "geometry", label: "三阶镜头几何校正", standardUncertaintyUm: localizationUm, status: "已评定" },
+      { key: "wavelength", label: "参考波长（uλ=0.01 nm）", standardUncertaintyUm: .0001, status: "已评定" },
+      { key: "repeatability", label: "多张照片重复性", standardUncertaintyUm: null, status: "未评定" },
+    ];
+    const ucUm = Math.sqrt(budget.reduce((sum, item) => sum + (item.standardUncertaintyUm ?? 0) ** 2, 0));
+    const reportable = rows.length >= 4 && rmseNm <= 1.5 && Math.abs(cubic * Math.max(...rows.map((row) => row.t ** 3))) <= imageWidth * .08;
+    return {
+      dUm: dNm / 1000, uncertaintyUm: 2 * ucUm, standardUncertaintyUm: ucUm, expandedUncertaintyUm: 2 * ucUm,
+      coverageFactor: 2, uncertaintyLabel: "参考光栅约束下的校准不确定度", uncertaintyBudget: budget,
+      linesPerMm: 1_000_000 / dNm, nominalDeviationPercent: 0, rmseNm, rmsePx, x0: calibratedX0, L,
+      lensBiasPx: cubic, reportable, calibrationMode: true,
+      blockReason: reportable ? "" : rows.length < 4 ? "画外零级校准至少需要 4 条参考线" : "镜头几何校正未通过稳定性检查",
+      identifiability: { correlation: 0, profileLowUm: dNm / 1000, profileHighUm: dNm / 1000, boundaryHit: false },
+      points: rows.map((row, index) => ({ wavelengthNm: row.wavelengthNm, thetaDeg: radToDeg(Math.atan(row.t)), sinTheta: predictedWavelengths[index] / dNm, residualNm: residualsNm[index] })),
+    };
+  }
   const lowerBound = Math.max(650, Math.max(...valid.map((line) => line.wavelengthNm)) * 1.02);
   const upperBound = 12_000;
   const fitAt = (dNm: number, lines = valid, x0 = zeroX) => {

@@ -561,7 +561,7 @@ function MarkerPicker({ selected, setSelected, markers, onClear, onRemove, image
     <div className="marker-picker-head"><label>选择要标记的汞灯谱线<select value={selected} onChange={(event) => setSelected(Number(event.target.value))}>{SPECTRAL_LIBRARY.mercury.map((line) => <option value={line.wavelengthNm} key={line.wavelengthNm}>{line.wavelengthNm.toFixed(2)} nm · {line.family}</option>)}</select></label><button onClick={onClear} disabled={!markers.length}>清空</button></div>
     <p>候选谱线数量不限；系统匹配其中可确认的汞灯参考线，其余谱线与干扰峰保留供复核。</p>
     {image && <div className="candidate-strip" aria-label="检测到的候选峰">{image.peaks.map((peak, index) => <button key={`${peak.x}-${index}`} onClick={() => onCandidate(peak.xRatio)}><i style={{ background: peak.color }} />峰 {index + 1}<small>{peak.x.toFixed(1)}px</small></button>)}</div>}
-    <div className="selected-markers">{markers.length ? markers.map((marker) => <button key={marker.wavelengthNm} onClick={() => onRemove(marker.wavelengthNm)} title="移除此标记"><i style={{ background: lineColor(marker.wavelengthNm) }} />{marker.wavelengthNm.toFixed(2)} nm<span>×</span></button>) : <span>尚未选择参考线；画内有零级至少标记 2 条，画外零级至少标记 3 条。</span>}</div>
+    <div className="selected-markers">{markers.length ? markers.map((marker) => <button key={marker.wavelengthNm} onClick={() => onRemove(marker.wavelengthNm)} title="移除此标记"><i style={{ background: lineColor(marker.wavelengthNm) }} />{marker.wavelengthNm.toFixed(2)} nm<span>×</span></button>) : <span>尚未选择参考线；画内有零级至少标记 2 条，画外零级校准至少标记 4 条。</span>}</div>
   </div>;
 }
 
@@ -874,27 +874,28 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
   const repeatDValues = useMemo(() => repeatSources.flatMap((source) => {
     const image = applyMercuryFiveLineModel(detectSpectrumPeaks(source, detector));
     const markers = autoMatchMercuryPeaks(image);
-    const zero = detectZeroOrder(image, image.peaks) ?? inferZeroFromMercuryLines(markers, image.width);
-    const minimumReferences = detectZeroOrder(image, image.peaks) ? 2 : 3;
+    const directZero = detectZeroOrder(image, image.peaks);
+    const zero = directZero ?? inferZeroFromMercuryLines(markers, image.width);
+    const minimumReferences = directZero ? 2 : 4;
     if (!zero || markers.length < minimumReferences || image.overexposed || !image.sharpnessOk) return [];
     try {
-      const result = fitGratingFromPixels(markers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * image.width, uncertaintyPx: .35 })), zero.x, image.width, { zeroUncertaintyPx: zero.uncertaintyPx, wavelengthUncertaintyNm: .01 });
+      const result = fitGratingFromPixels(markers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * image.width, uncertaintyPx: .35 })), zero.x, image.width, { zeroUncertaintyPx: zero.uncertaintyPx, wavelengthUncertaintyNm: .01, referenceCalibration: !directZero });
       return result.reportable ? [result.dUm] : [];
     } catch { return []; }
   }), [repeatSources, detector]);
 
   const aResult = useMemo(() => {
-    const minimumReferences = directZeroDetection ? 2 : 3;
+    const minimumReferences = directZeroDetection ? 2 : 4;
     if (!aComplete || !aImage || aMarkers.length < minimumReferences) return null;
     try {
-      const provisional = fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), effectiveZeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01 });
-      return fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), effectiveZeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01, repeatDValuesUm: [provisional.dUm, ...repeatDValues] });
+      const provisional = fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), effectiveZeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01, referenceCalibration: !directZeroDetection });
+      return fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), effectiveZeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01, repeatDValuesUm: [provisional.dUm, ...repeatDValues], referenceCalibration: !directZeroDetection });
     } catch { return null; }
   }, [aComplete, aImage, aMarkers, effectiveZeroX, zeroDetection, directZeroDetection, repeatDValues]);
 
   const yellowDoubletResolved = aMarkers.some((item) => item.wavelengthNm === 576.96) && aMarkers.some((item) => item.wavelengthNm === 579.07) && (() => { const yellow = aMarkers.filter((item) => item.wavelengthNm >= 576); return yellow.length === 2 && Math.abs(yellow[1].xRatio - yellow[0].xRatio) * (aImage?.width ?? 0) >= 1.5; })();
   const repeatsValid = repeatSources.length === repeatDValues.length;
-  const minimumReferences = directZeroDetection ? 2 : 3;
+  const minimumReferences = directZeroDetection ? 2 : 4;
   const hasResult = Boolean(aResult?.reportable && aMarkers.length >= minimumReferences && zeroDetection && aImage?.sharpnessOk && !aImage.overexposed && repeatsValid);
   const blockReason = !aImage ? "等待上传光谱照片" : aImage.overexposed ? "照片过曝，请降低曝光后重拍" : !aImage.sharpnessOk ? "谱线不够清晰，请重新对焦后拍摄" : aMarkers.length < minimumReferences ? `当前几何条件至少需要 ${minimumReferences} 条可靠参考线` : !zeroDetection ? "无法由已匹配参考线确定画外零级，请继续标记" : !repeatsValid ? "至少一张重复照片未通过认线或质量检查" : aResult && !aResult.reportable ? aResult.blockReason : "";
   const status = !aImage ? "待上传" : hasResult ? "已完成" : blockReason ? "被阻塞" : "可计算";
@@ -999,7 +1000,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
     <section className="panel review-note-panel"><div className="analysis-card-heading"><span><ClipboardCheck size={18} /></span><div><h2>异常诊断与复核意见</h2><p>记录异常现象、可能原因和复核结论；输入内容会随实验记录自动同步。</p></div></div><textarea value={diagnosis} maxLength={2000} onChange={(event) => setDiagnosis(event.target.value)} placeholder="例如：黄色双线未完全分离，已重新调整狭缝并复测。" /></section>
     <div className="analysis-results-grid">
       <section className="panel intensity-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>强度剖面与谱线标注</h2><p>曲线、候选峰和人工参考标记来自当前图像数据。</p></div></div><IntensityChart image={aImage} markers={aMarkers} title="光谱横向强度剖面" /></section>
-      <div className="analysis-result-stack"><section className="panel final-result-card"><div className="analysis-card-heading"><span><BarChart3 size={18} /></span><div><h2>最终光栅结果</h2><p>仅当可辨识性、边界与质量检查全部通过时生成。</p></div></div>{hasResult && aResult ? <div className="final-measure"><small>光栅常数 d · {aResult.uncertaintyLabel}</small><strong>{aResult.dUm.toFixed(3)} <em>± {aResult.expandedUncertaintyUm.toFixed(3)} μm</em></strong><p>U = 2u<sub>c</sub>，k = {aResult.coverageFactor} · {aResult.linesPerMm.toFixed(1)} 线/mm</p><p>{zeroDetection && "inferred" in zeroDetection ? "五线反推" : "独立"} x₀ = {aResult.x0.toFixed(2)} px · 拟合 |L| = {Math.abs(aResult.L).toFixed(1)} px</p></div> : <div className="result-placeholder"><FlaskConical size={28} /><span>{aResult ? `候选拟合不可报告：${aResult.blockReason || blockReason}` : "等待执行测量"}</span></div>}</section>
+      <div className="analysis-result-stack"><section className="panel final-result-card"><div className="analysis-card-heading"><span><BarChart3 size={18} /></span><div><h2>最终光栅结果</h2><p>仅当可辨识性、边界与质量检查全部通过时生成。</p></div></div>{hasResult && aResult ? <div className="final-measure"><small>{"calibrationMode" in aResult ? "标称光栅约束校准" : "光栅常数 d"} · {aResult.uncertaintyLabel}</small><strong>{aResult.dUm.toFixed(3)} <em>± {aResult.expandedUncertaintyUm.toFixed(3)} μm</em></strong><p>U = 2u<sub>c</sub>，k = {aResult.coverageFactor} · {aResult.linesPerMm.toFixed(1)} 线/mm</p><p>{zeroDetection && "inferred" in zeroDetection ? "参考线联合反推" : "独立"} x₀ = {aResult.x0.toFixed(2)} px · 拟合 |L| = {Math.abs(aResult.L).toFixed(1)} px</p></div> : <div className="result-placeholder"><FlaskConical size={28} /><span>{aResult ? `候选拟合不可报告：${aResult.blockReason || blockReason}` : "等待执行测量"}</span></div>}</section>
         <section className="panel residual-card"><div className="analysis-card-heading"><span><Target size={18} /></span><div><h2>拟合残差复核</h2><p>逐条检查预测值与参考值。</p></div></div>{aResult ? <div className="residual-table"><div><b>标准 λ</b><b>换算 θ</b><b>残差</b></div>{aResult.points.map((point) => <div key={point.wavelengthNm}><span>{point.wavelengthNm.toFixed(2)} nm</span><span>{point.thetaDeg.toFixed(3)}°</span><strong>{point.residualNm >= 0 ? "+" : ""}{point.residualNm.toFixed(3)} nm</strong></div>)}</div> : <div className="result-placeholder compact"><Target size={25} /><span>完成计算后显示逐线残差</span></div>}</section></div>
     </div>
     {aResult && <section className="panel uncertainty-panel"><div className="analysis-card-heading wide"><span><CircleHelp size={18} /></span><div><h2>完整不确定度预算</h2><p>各标准不确定度按平方和合成 u<sub>c</sub>；覆盖因子 k=2。</p></div></div><div className="uncertainty-table"><div><b>分量</b><b>标准不确定度</b><b>评定状态</b></div>{aResult.uncertaintyBudget.map((item) => <div key={item.key}><span>{item.label}</span><strong>{item.standardUncertaintyUm === null ? "—" : `${item.standardUncertaintyUm.toFixed(4)} μm`}</strong><em>{item.status}</em></div>)}</div><div className="diagnostic-strip"><span>相关系数 <strong>{aResult.identifiability.correlation.toFixed(5)}</strong></span><span>95% 剖面区间 <strong>{aResult.identifiability.profileLowUm.toFixed(3)}–{aResult.identifiability.profileHighUm.toFixed(3)} μm</strong></span><span>边界检查 <strong>{aResult.identifiability.boundaryHit ? "命中" : "通过"}</strong></span></div></section>}
