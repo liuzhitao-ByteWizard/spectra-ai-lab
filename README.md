@@ -1,4 +1,42 @@
-# vinext-starter
+# SPECTRA · AI 分光计实验学习助手
+
+面向大学物理分光计与光栅实验的交互式学习网站，覆盖虚拟仪器练习、衍射图样分析、实验记录与 AI 辅导。
+
+## 在线访问
+
+[https://spectra-lab.byte-wizard.chatgpt.site](https://spectra-lab.byte-wizard.chatgpt.site)
+
+## 本地运行
+
+需要 Node.js 22.13 或更高版本。
+
+```bash
+npm install
+npm run dev
+```
+
+生产构建：
+
+```bash
+npm run build
+```
+
+## 环境变量
+
+复制 `.env.example` 为 `.env.local`，并配置：
+
+- `DEEPSEEK_API_KEY`：AI 助教接口密钥
+- `DEEPSEEK_MODEL`：可选，默认使用 `deepseek-v4-flash`
+
+请勿把 `.env.local` 或任何真实密钥提交到仓库。
+
+## 技术栈
+
+Next.js、Vinext、React、Cloudflare Workers、D1、R2 与 Drizzle ORM。
+
+---
+
+以下内容为项目脚手架与托管环境的开发说明。
 
 A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
 

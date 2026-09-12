@@ -26,3 +26,9 @@ export const experiments = sqliteTable(
     index("idx_experiments_user_updated_at").on(table.userId, table.updatedAt),
   ],
 );
+
+export const experimentJourneys = sqliteTable("experiment_journeys", {
+  userId: text("user_id").primaryKey(),
+  payload: text("payload").notNull().default("{}"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(sql`0`),
+});

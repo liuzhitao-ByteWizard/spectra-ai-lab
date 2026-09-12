@@ -37,6 +37,7 @@ yarn-error.log*
 
 # typescript
 next-env.d.ts
+*.tsbuildinfo
 /dist/
 /.wrangler/
 /.sites-runtime/
@@ -44,3 +45,6 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+# local Codex maintenance helpers
+.codex-chat-local-purge.*
