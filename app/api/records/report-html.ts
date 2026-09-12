@@ -9,7 +9,7 @@ const formatNumber = (value: unknown, digits = 3, suffix = "") => {
   return number === null ? "未记录" : `${number.toFixed(digits)}${suffix}`;
 };
 const formatDate = (value: string | number) => new Intl.DateTimeFormat("zh-CN", {
-  year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
 }).format(new Date(value));
 const checkText = (value: unknown, pass: string, fail: string) => value === true ? pass : value === false ? fail : "未记录";
 
