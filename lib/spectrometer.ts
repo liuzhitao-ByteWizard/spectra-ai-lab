@@ -182,33 +182,6 @@ export function fitGratingFromPixels(
   };
 }
 
-export function calibrateSpectrum(
-  references: { x: number; wavelengthNm: number }[],
-  gratingUm: number,
-  model: "plane" | "curved" = "plane",
-) {
-  if (references.length < 2) throw new Error("至少需要两条参考谱线");
-  const dNm = gratingUm * 1000;
-  const values = references.map((item) => {
-    const base = Math.asin(item.wavelengthNm / dNm);
-    return { ...item, t: model === "plane" ? Math.tan(base) : base };
-  });
-  const meanT = values.reduce((sum, item) => sum + item.t, 0) / values.length;
-  const meanX = values.reduce((sum, item) => sum + item.x, 0) / values.length;
-  const covariance = values.reduce((sum, item) => sum + (item.t - meanT) * (item.x - meanX), 0);
-  const variance = values.reduce((sum, item) => sum + (item.t - meanT) ** 2, 0);
-  const L = covariance / variance;
-  const x0 = meanX - L * meanT;
-  const predictedWavelength = (x: number) => {
-    const t = (x - x0) / L;
-    const theta = model === "plane" ? Math.atan(t) : t;
-    return dNm * Math.sin(theta);
-  };
-  const errors = values.map((item) => predictedWavelength(item.x) - item.wavelengthNm);
-  const rmseNm = Math.sqrt(errors.reduce((sum, value) => sum + value ** 2, 0) / errors.length);
-  return { L, x0, rmseNm, model, predict: predictedWavelength };
-}
-
 export function compareReadings(rows: { wavelengthNm: number; handDeg: number; aiDeg: number }[]) {
   const table = rows.map((row) => {
     const diffArcmin = (row.handDeg - row.aiDeg) * 60;
