@@ -1044,7 +1044,7 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
     });
   }, []);
   useEffect(() => {
-    if (!authenticated) { journeyLoadedRef.current = false; return; }
+    if (!authenticated) { journeyLoadedRef.current = true; return; }
     fetch("/api/journey", { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error("流程状态读取失败");
       const data = await response.json() as { journey: ExperimentJourney };
@@ -1054,6 +1054,7 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
     }).catch(() => toast.warning("云端流程暂不可用，本页仍可继续操作")).finally(() => { journeyLoadedRef.current = true; });
   }, [authenticated]);
   useEffect(() => {
+    if (!authenticated) return;
     if (!journeyLoadedRef.current) return;
     const signature = JSON.stringify({ ...journey, updatedAt: 0 });
     if (signature === journeySavedSignatureRef.current) return;
@@ -1065,7 +1066,7 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
         .catch(() => { journeySavedSignatureRef.current = ""; toast.error("流程状态尚未同步，稍后会在下一次更改时重试"); });
     }, 650);
     return () => { if (journeySaveTimerRef.current) clearTimeout(journeySaveTimerRef.current); };
-  }, [journey]);
+  }, [authenticated, journey]);
   useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [active]);
   useEffect(() => {
     const context = document.modelContext; if (!context?.registerTool) return; const lifecycle = new AbortController();
