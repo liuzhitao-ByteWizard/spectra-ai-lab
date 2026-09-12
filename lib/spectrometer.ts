@@ -101,7 +101,7 @@ export function fitGratingFromPixels(
   const valid = references.filter(
     (line) => Number.isFinite(line.x) && Number.isFinite(line.wavelengthNm) && line.wavelengthNm > 0,
   );
-  if (valid.length < 4) throw new Error("几何拟合至少需要 4 条有效汞线");
+  if (valid.length < 2) throw new Error("几何拟合至少需要 2 条有效参考线");
   if (!Number.isFinite(zeroX)) throw new Error("未检测到有效零级位置");
   if (!Number.isFinite(imageWidth) || imageWidth <= 0) throw new Error("图像宽度无效");
   const lowerBound = Math.max(650, Math.max(...valid.map((line) => line.wavelengthNm)) * 1.02);
@@ -113,7 +113,9 @@ export function fitGratingFromPixels(
     const denominator = t.reduce((sum, value, index) => sum + weights[index] * value * value, 0);
     if (denominator <= 0) return null;
     const L = t.reduce((sum, value, index) => sum + weights[index] * value * (lines[index].x - x0), 0) / denominator;
-    if (!Number.isFinite(L) || L <= 0) return null;
+    // L is signed: a first-order spectrum may appear on either side of the
+    // zero order. Its magnitude is the physical image scale.
+    if (!Number.isFinite(L) || Math.abs(L) <= 0) return null;
     const residualPx = lines.map((line, index) => line.x - (x0 + L * t[index]));
     const sse = residualPx.reduce((sum, value, index) => sum + weights[index] * value * value, 0);
     return { dNm, L, t, weights, residualPx, sse };
@@ -137,7 +139,7 @@ export function fitGratingFromPixels(
   const best = optimize();
   if (!best) throw new Error("零级与一级谱线无法形成有效的光栅模型");
   const rmsePx = Math.sqrt(best.residualPx.reduce((sum, value) => sum + value ** 2, 0) / valid.length);
-  const predictedWavelengths = valid.map((line) => best.dNm * Math.sin(Math.atan((line.x - zeroX) / best.L)));
+  const predictedWavelengths = valid.map((line) => best.dNm * Math.abs(Math.sin(Math.atan((line.x - zeroX) / best.L))));
   const residualsNm = valid.map((line, index) => line.wavelengthNm - predictedWavelengths[index]);
   const rmseNm = Math.sqrt(residualsNm.reduce((sum, value) => sum + value ** 2, 0) / valid.length);
 
@@ -215,7 +217,7 @@ export function fitGratingFromPixels(
     identifiability: { correlation, profileLowUm: profileLow / 1000, profileHighUm: profileHigh / 1000, boundaryHit },
     points: valid.map((line, index) => ({
       wavelengthNm: line.wavelengthNm,
-      thetaDeg: radToDeg(Math.atan((line.x - zeroX) / best.L)),
+      thetaDeg: Math.abs(radToDeg(Math.atan((line.x - zeroX) / best.L))),
       sinTheta: predictedWavelengths[index] / best.dNm,
       residualNm: residualsNm[index],
     })),
