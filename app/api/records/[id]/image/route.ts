@@ -11,7 +11,7 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 function imageSlot(request: Request): ExperimentImageSlot | null {
   const slot = new URL(request.url).searchParams.get("slot");
-  return slot === "primary" || slot === "repeat_2" || slot === "repeat_3" || slot === "reference" || slot === "unknown" ? slot : null;
+  return slot === "primary" || slot === "repeat_2" || slot === "repeat_3" ? slot : null;
 }
 
 export async function GET(request: Request, context: RouteContext) {
@@ -23,7 +23,7 @@ export async function GET(request: Request, context: RouteContext) {
     if (!slot) return noStoreJson({ error: "图片类型无效" }, { status: 400 });
     const { id } = await context.params;
     const [record] = await getDb().select().from(experiments)
-      .where(and(eq(experiments.id, id), eq(experiments.userId, user.userId)))
+      .where(and(eq(experiments.id, id), eq(experiments.userId, user.userId), eq(experiments.task, "A")))
       .limit(1);
     if (!record) return noStoreJson({ error: "未找到记录" }, { status: 404 });
     const key = safeImageKeys(record.imageKeys)[slot];
@@ -54,7 +54,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     const { id } = await context.params;
     const [current] = await getDb().select().from(experiments)
-      .where(and(eq(experiments.id, id), eq(experiments.userId, user.userId)))
+      .where(and(eq(experiments.id, id), eq(experiments.userId, user.userId), eq(experiments.task, "A")))
       .limit(1);
     if (!current) return noStoreJson({ error: "未找到记录" }, { status: 404 });
     const bytes = await request.arrayBuffer();
@@ -67,7 +67,7 @@ export async function POST(request: Request, context: RouteContext) {
       imageKeys: JSON.stringify(imageKeys),
       updatedAt: new Date(),
       version: sql`${experiments.version} + 1`,
-    }).where(and(eq(experiments.id, id), eq(experiments.userId, user.userId))).returning();
+    }).where(and(eq(experiments.id, id), eq(experiments.userId, user.userId), eq(experiments.task, "A"))).returning();
     return noStoreJson({ record: serializeRecord(record) });
   } catch (error) {
     return noStoreJson({ error: error instanceof Error ? error.message : "图片同步失败" }, { status: 503 });

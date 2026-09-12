@@ -38,7 +38,7 @@ export function safeStringArray(value: string): string[] {
 export function safeImageKeys(value: string): Partial<Record<ExperimentImageSlot, string>> {
   const parsed = safeJsonObject(value);
   const result: Partial<Record<ExperimentImageSlot, string>> = {};
-  for (const slot of ["primary", "repeat_2", "repeat_3", "reference", "unknown"] as const) {
+  for (const slot of ["primary", "repeat_2", "repeat_3"] as const) {
     if (typeof parsed[slot] === "string") result[slot] = parsed[slot] as string;
   }
   return result;
@@ -65,6 +65,7 @@ export function serializeRecord(record: DbRecord) {
 }
 
 export function parseRecordBody(body: Record<string, unknown>) {
+  if (body.task !== undefined && body.task !== "A") throw new Error("仅支持汞灯已知谱线测量任务");
   const payload = body.payload && typeof body.payload === "object" && !Array.isArray(body.payload) ? body.payload : {};
   const payloadText = JSON.stringify(payload);
   if (payloadText.length > 750_000) throw new Error("实验数据过大，请减少无关数据后重试");
@@ -72,7 +73,7 @@ export function parseRecordBody(body: Record<string, unknown>) {
   const steps = rawSteps.filter((item): item is string => typeof item === "string").slice(0, 12);
   const status: ExperimentStatus = body.status === "needs_review" ? "needs_review" : body.status === "completed" ? "completed" : "draft";
   return {
-    task: (body.task === "B" ? "B" : "A") as ExperimentTask,
+    task: "A" as ExperimentTask,
     source: typeof body.source === "string" ? body.source.slice(0, 32) : "汞灯",
     resultLabel: typeof body.resultLabel === "string" ? body.resultLabel.slice(0, 32) : "实验结果",
     resultValue: typeof body.resultValue === "string" ? body.resultValue.slice(0, 96) : "进行中",

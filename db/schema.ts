@@ -10,7 +10,7 @@ export const experiments = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(sql`0`),
     version: integer("version").notNull().default(1),
     lastMutationId: text("last_mutation_id"),
-    task: text("task", { enum: ["A", "B"] }).notNull(),
+    task: text("task", { enum: ["A"] }).notNull(),
     source: text("source").notNull(),
     resultLabel: text("result_label").notNull(),
     resultValue: text("result_value").notNull(),

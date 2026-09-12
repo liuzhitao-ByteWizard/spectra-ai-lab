@@ -231,10 +231,6 @@ h1 { margin: 0; max-width: 760px; font-size: clamp(25px, 3vw, 38px); line-height
 .quality-row i.warn { background: #f0a315; }
 .analyze-button:disabled { opacity: .6; }
 .confidence-progress { height: 5px; margin-top: 8px; }
-.unknown-control { margin-top: 20px; padding: 14px; border-radius: 11px; background: #f2f6fb; }
-.unknown-control label { display: grid; gap: 8px; color: #536a82; font-size: 13px; }
-.unknown-control input { width: 100%; accent-color: #176fe9; }
-.unknown-control output { display: block; margin-top: 5px; color: #173653; font-size: 13px; font-weight: 700; }
 .calibration-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .calibration-stats span { padding: 10px; color: #23415e; background: #f2f6fa; border-radius: 9px; font-size: 13px; font-weight: 700; }
 .calibration-stats small { display: block; margin-bottom: 4px; color: #7c8da0; font-size: 12px; font-weight: 500; }

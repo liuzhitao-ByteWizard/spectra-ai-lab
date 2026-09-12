@@ -14,7 +14,8 @@ export async function GET(request: Request) {
     const since = Number(url.searchParams.get("since") || 0);
     const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 30)));
     const filters = [eq(experiments.userId, user.userId)];
-    if (task === "A" || task === "B") filters.push(eq(experiments.task, task));
+    if (task && task !== "A") return noStoreJson({ error: "仅支持汞灯已知谱线测量任务" }, { status: 400 });
+    filters.push(eq(experiments.task, "A"));
     if (Number.isFinite(since) && since > 0) filters.push(gt(experiments.updatedAt, new Date(since)));
 
     const records = await getDb().select().from(experiments)

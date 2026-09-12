@@ -416,7 +416,7 @@ function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
         <div className="hero-copy">
           <p className="eyebrow">AI + 物理实验</p>
           <h1>融合 AI 技术的衍射图样分析与参数反演研究</h1>
-          <p>课前先在虚拟仪器上找谱线，课中由 AI 认线并与手读互证，课后沿着证据回放每一步。</p>
+          <p>课前用虚拟仪器完成预习，课中从真实照片自动检查零级、汞线与拟合质量，课后沿五阶段证据复盘。</p>
           <div className="hero-actions"><button className="primary-action" onClick={() => navigate("guide")}><ListChecks size={18} />开始实验流程</button><button className="secondary-action" onClick={() => navigate("simulator")}><Play size={17} />进入虚拟预习</button></div>
         </div>
         <AnalysisGlassPanel />
@@ -425,7 +425,7 @@ function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
       <section className="pain-grid">
         {[
           { icon: Telescope, ask: "预习只看讲义，真机还是不会调？", answer: "先在虚拟分光计中瞄准、读数、拟合 d。", target: "simulator" as ModuleId },
-          { icon: ScanLine, ask: "谱线难认、游标难读，错在哪不清楚？", answer: "图像认线与手读并排，偏差形态直接给证据。", target: "analysis" as ModuleId },
+          { icon: ScanLine, ask: "零级、黄双线或照片质量，错在哪不清楚？", answer: "真实图像自动质检与认线，阻塞原因直接给出证据。", target: "analysis" as ModuleId },
           { icon: History, ask: "做完只剩一个结果，过程无法复盘？", answer: "保存峰值、匹配、拟合与诊断，按时间轴回放。", target: "records" as ModuleId },
         ].map((item, index) => <button className="pain-card" key={item.ask} onClick={() => navigate(item.target)}><span className="pain-number">0{index + 1}</span><item.icon size={22} /><strong>{item.ask}</strong><p>{item.answer}</p><em>打开模块 <ArrowRight size={14} /></em></button>)}
       </section>
@@ -585,11 +585,11 @@ function useExperimentSync({
   pendingImagesRef: React.MutableRefObject<PendingImages>;
   onRemoteRecord: (record: SavedRecord) => Promise<void>;
 }) {
-  const metaRef = useRef<Record<ExperimentTask, { id: string; version: number } | null>>({ A: null, B: null });
+  const metaRef = useRef<Record<ExperimentTask, { id: string; version: number } | null>>({ A: null });
   const latestSnapshotRef = useRef<Partial<Record<ExperimentTask, RecordSnapshot>>>({});
   const lastSavedSignatureRef = useRef<Partial<Record<ExperimentTask, string>>>({});
-  const loadedRef = useRef<Record<ExperimentTask, boolean>>({ A: false, B: false });
-  const syncingRef = useRef<Record<ExperimentTask, boolean>>({ A: false, B: false });
+  const loadedRef = useRef<Record<ExperimentTask, boolean>>({ A: false });
+  const syncingRef = useRef<Record<ExperimentTask, boolean>>({ A: false });
   const suppressRef = useRef<Set<ExperimentTask>>(new Set());
   const timersRef = useRef<Partial<Record<ExperimentTask, ReturnType<typeof setTimeout>>>>({});
   const currentTaskRef = useRef(task);
@@ -601,9 +601,11 @@ function useExperimentSync({
   const [errorMessage, setErrorMessage] = useState("");
   const [loadRevision, setLoadRevision] = useState(0);
 
-  currentTaskRef.current = task;
-  onRemoteRecordRef.current = onRemoteRecord;
-  latestSnapshotRef.current[task] = snapshot;
+  useEffect(() => {
+    currentTaskRef.current = task;
+    onRemoteRecordRef.current = onRemoteRecord;
+    latestSnapshotRef.current[task] = snapshot;
+  }, [task, onRemoteRecord, snapshot]);
 
   const changePhase = useCallback((next: SyncPhase) => {
     phaseRef.current = next;
@@ -680,15 +682,11 @@ function useExperimentSync({
       }
     }
   }, [adoptRecord, authenticated, changePhase, pendingImagesRef]);
-  runSyncRef.current = runSync;
+  useEffect(() => { runSyncRef.current = runSync; }, [runSync]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!authenticated) {
-      changePhase("idle");
-      setErrorMessage("");
-      return;
-    }
+    if (!authenticated) return;
     if (loadedRef.current[task]) {
       changePhase(metaRef.current[task] ? "synced" : "idle");
       return;
@@ -720,8 +718,9 @@ function useExperimentSync({
     if (signature === lastSavedSignatureRef.current[task]) return;
     changePhase("pending");
     if (timersRef.current[task]) clearTimeout(timersRef.current[task]);
-    timersRef.current[task] = setTimeout(() => void runSyncRef.current(task), 800);
-    return () => { if (timersRef.current[task]) clearTimeout(timersRef.current[task]); };
+    const timer = setTimeout(() => void runSyncRef.current(task), 800);
+    timersRef.current[task] = timer;
+    return () => clearTimeout(timer);
   }, [task, enabled, authenticated, snapshot, loadRevision, changePhase]);
 
   useEffect(() => {
@@ -771,11 +770,11 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
   const [busy, setBusy] = useState(false);
   const [diagnosis, setDiagnosis] = useState("");
   const [repeatSources, setRepeatSources] = useState<SpectrumSource[]>([]);
-  const pendingImagesRef = useRef<PendingImages>({ A: {}, B: {} });
+  const pendingImagesRef = useRef<PendingImages>({ A: {} });
 
   const aImage = useMemo(() => aSource ? applyMercuryFiveLineModel(detectSpectrumPeaks(aSource, detector)) : null, [aSource, detector]);
   const zeroDetection = useMemo(() => aImage ? detectZeroOrder(aImage, aImage.peaks) : null, [aImage]);
-  useEffect(() => { if (zeroDetection) setZeroX(zeroDetection.x); }, [zeroDetection?.x]);
+  const effectiveZeroX = zeroDetection?.x ?? zeroX;
 
   useEffect(() => () => { if (aSource?.preview) URL.revokeObjectURL(aSource.preview); }, [aSource?.preview]);
 
@@ -828,10 +827,10 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
   const aResult = useMemo(() => {
     if (!aComplete || !aImage || aMarkers.length < 4) return null;
     try {
-      const provisional = fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), zeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01 });
-      return fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), zeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01, repeatDValuesUm: [provisional.dUm, ...repeatDValues] });
+      const provisional = fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), effectiveZeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01 });
+      return fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), effectiveZeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01, repeatDValuesUm: [provisional.dUm, ...repeatDValues] });
     } catch { return null; }
-  }, [aComplete, aImage, aMarkers, zeroX, zeroDetection?.uncertaintyPx, repeatDValues]);
+  }, [aComplete, aImage, aMarkers, effectiveZeroX, zeroDetection, repeatDValues]);
 
   const yellowDoubletResolved = aMarkers.some((item) => item.wavelengthNm === 576.96) && aMarkers.some((item) => item.wavelengthNm === 579.07) && (() => { const yellow = aMarkers.filter((item) => item.wavelengthNm >= 576); return yellow.length === 2 && Math.abs(yellow[1].xRatio - yellow[0].xRatio) * (aImage?.width ?? 0) >= 1.5; })();
   const repeatsValid = repeatSources.length === repeatDValues.length;
@@ -856,7 +855,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
     if (zeroDetection && aMarkers.length === 5 && yellowDoubletResolved) steps.push("零级定位与汞线匹配");
     if (hasResult) steps.push("d 反演及不确定度评估", "云端归档与实验复盘");
     const payload = {
-      state: { detector, zeroX, scaleL, complete: aComplete, sample: Boolean(aSource?.sample) },
+      state: { detector, zeroX: effectiveZeroX, scaleL, complete: aComplete, sample: Boolean(aSource?.sample) },
       referenceMarkers: aMarkers,
       result: aResult,
       processing: { peaks: aImage?.peaks.length ?? 0, overexposed: Boolean(aImage?.overexposed), sharpnessOk: Boolean(aImage?.sharpnessOk), zeroDetection },
@@ -873,7 +872,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
       diagnosis,
       payload,
     };
-  }, [aResult, aImage, hasResult, detector, zeroX, scaleL, aComplete, aSource?.sample, aMarkers, diagnosis, zeroDetection, blockReason, journey.prelab]);
+  }, [aResult, aImage, hasResult, detector, effectiveZeroX, scaleL, aComplete, aSource?.sample, aMarkers, diagnosis, zeroDetection, blockReason, journey.prelab, yellowDoubletResolved]);
 
   const hydrateRecord = useCallback(async (record: SavedRecord) => {
     const state = record.payload.state && typeof record.payload.state === "object" ? record.payload.state as Record<string, unknown> : {};
@@ -923,7 +922,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
     <PageHeading eyebrow="实验 · 图像分析工作台" title="从光谱照片到可复核的测量结果。" description="调整检测参数、标记参考谱线，再沿强度曲线、拟合残差和处理过程检查每一步。" />
     <div className="analysis-workbench">
       <aside className="panel parameter-panel"><div className="analysis-card-heading"><span><SlidersHorizontal size={18} /></span><div><h2>测量参数</h2><p>先独立检测 x₀，再由已知汞线估计 L 与 d。</p></div></div><div className="parameter-form">
-        <label>零级位置 x₀（独立检测）<input type="number" value={Number(zeroX.toFixed(2))} disabled /></label><label>成像尺度 L（主拟合）<input type="number" value={aResult ? Number(aResult.L.toFixed(1)) : scaleL} disabled /></label>
+        <label>零级位置 x₀（独立检测）<input type="number" value={Number(effectiveZeroX.toFixed(2))} disabled /></label><label>成像尺度 L（主拟合）<input type="number" value={aResult ? Number(aResult.L.toFixed(1)) : scaleL} disabled /></label>
         <label>峰值突出度 <output>{detector.prominence.toFixed(3)}</output><input type="range" min=".005" max=".2" step=".005" value={detector.prominence} onChange={(event) => setDetector((value) => ({ ...value, prominence: Number(event.target.value) }))} /></label>
         <label>最小峰间距（px）<input type="number" min="2" max="64" value={detector.minDistancePx} onChange={(event) => setDetector((value) => ({ ...value, minDistancePx: Math.min(64, Math.max(2, Number(event.target.value))) }))} /></label>
         <div className="parameter-buttons"><button className="reset-button parameter-reset" onClick={resetTask}><RotateCcw size={15} />恢复默认</button><button className="reset-button parameter-reset sample-button" onClick={loadSample}><Play size={15} />加载示例</button></div>
@@ -978,10 +977,10 @@ function GuideModule({ journey, navigate }: { journey: ExperimentJourney; naviga
 }
 
 function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: ModuleId) => void; authenticated: boolean; authHref: string }) {
-  const [records, setRecords] = useState<SavedRecord[]>([]); const [loading, setLoading] = useState(true); const [selected, setSelected] = useState<SavedRecord | null>(null);
+  const [records, setRecords] = useState<SavedRecord[]>([]); const [loading, setLoading] = useState(authenticated); const [selected, setSelected] = useState<SavedRecord | null>(null);
   const [errorMessage, setErrorMessage] = useState(""); const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const refresh = useCallback(async () => {
-    if (!authenticated) { setLoading(false); return; }
+    if (!authenticated) return;
     try {
       const { records: latest } = await requestRecordJson<{ records: SavedRecord[] }>("/api/records?limit=100", undefined, 2);
       setRecords(latest);
@@ -992,12 +991,12 @@ function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: M
     } finally { setLoading(false); }
   }, [authenticated]);
   useEffect(() => {
-    if (!authenticated) { setLoading(false); return; }
-    void refresh();
+    if (!authenticated) return;
+    const initial = window.setTimeout(() => void refresh(), 0);
     const interval = setInterval(() => void refresh(), 3000);
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
-    return () => { clearInterval(interval); window.removeEventListener("focus", onFocus); };
+    return () => { clearTimeout(initial); clearInterval(interval); window.removeEventListener("focus", onFocus); };
   }, [authenticated, refresh]);
   const exportCsv = () => { const rows = [["最后更新", "任务", "光源", "状态", "结果", "质量"], ...records.map((r) => [new Date(r.updatedAt).toLocaleString("zh-CN"), r.task, r.source, r.status === "draft" ? "进行中" : r.status === "needs_review" ? "需复核" : "已完成", r.resultValue, r.quality])]; downloadFile("spectra-experiments.csv", rows.map((row) => row.map((v) => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"), "text/csv"); };
   const exportReport = () => {
@@ -1014,7 +1013,7 @@ function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: M
   return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="结果不是终点，证据链才是。" description="打开一次记录，沿五阶段证据、不确定度预算和异常诊断回看；支持导出 CSV 与实验报告。" action={<button className="secondary-action" onClick={exportCsv} disabled={!records.length}><Download size={16} />导出全部 CSV</button>} />
     <div className={`records-sync ${errorMessage ? "error" : ""}`} aria-live="polite">{errorMessage ? <><CircleAlert size={15} /><span>{errorMessage}</span><button onClick={() => void refresh()}>重新加载</button></> : <><CheckCircle2 size={15} /><span>{lastUpdated ? `云端记录已更新 · ${new Date(lastUpdated).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "正在连接云端记录"}</span></>}</div>
     <div className="records-grid"><section className="panel record-list"><div className="panel-title"><div><span className="step-index"><History size={14} /></span><h2>我的实验</h2></div><span>{records.length} 条</span></div>{loading ? <div className="record-empty">正在读取实验记录…</div> : records.length ? records.map((record) => <button key={record.id} className={selected?.id === record.id ? "active" : ""} onClick={() => setSelected(record)}><span className="record-source"><Waves size={18} /></span><div><strong>{record.resultLabel}<small>{record.resultValue}</small></strong><p><Clock3 size={12} />{new Date(record.updatedAt).toLocaleString("zh-CN")} · {record.source}</p></div><em className={record.status === "completed" ? "good" : ""}>{record.status === "draft" ? "进行中" : record.status === "needs_review" ? "需复核" : "已完成"}</em></button>) : <div className="record-empty"><History size={30} /><strong>还没有实验记录</strong><p>上传光谱图片后，实验过程会自动同步并出现在这里。</p></div>}</section>
-      <section className="panel replay-panel">{selected ? <><div className="replay-head"><div><p className="eyebrow">实验回放 · 版本 {selected.version}</p><h2>{selected.resultLabel} · {selected.resultValue}</h2><small>最后同步于 {new Date(selected.updatedAt).toLocaleString("zh-CN")}</small></div><button className="secondary-action" onClick={exportReport}><FileText size={16} />导出报告</button></div><div className="record-evidence"><span><small>已完成步骤</small><strong>{selected.steps.length} 项</strong></span><span><small>参考谱线</small><strong>{markerCount} 条</strong></span><span><small>记录状态</small><strong>{selected.quality}</strong></span></div>{imageEntries.length > 0 && <div className="record-images">{imageEntries.map(([slot, url]) => <figure key={slot}><Image src={url} alt={slot === "unknown" ? "未知光谱原始图片" : "参考光谱原始图片"} width={800} height={450} unoptimized /><figcaption>{slot === "unknown" ? "未知光谱" : slot === "reference" ? "参考光谱" : "原始光谱"}</figcaption></figure>)}</div>}<div className="timeline">{selected.steps.length ? selected.steps.map((step, index) => <div className="timeline-item" key={step}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step}</strong><p>{step === "物理计算" ? `${selected.resultLabel} = ${selected.resultValue}` : "该步骤的参数和结果已保存到云端记录。"}</p></div>{index < selected.steps.length - 1 && <i />}</div>) : <div className="record-empty compact"><History size={28} /><strong>实验尚未开始</strong></div>}</div><div className="record-diagnosis"><strong>异常诊断与复核意见</strong><p>{selected.diagnosis || "未填写异常诊断或复核意见。"}</p></div></> : <div className="record-empty"><Microscope size={34} /><strong>选择一条记录开始回放</strong></div>}</section></div>
+      <section className="panel replay-panel">{selected ? <><div className="replay-head"><div><p className="eyebrow">实验回放 · 版本 {selected.version}</p><h2>{selected.resultLabel} · {selected.resultValue}</h2><small>最后同步于 {new Date(selected.updatedAt).toLocaleString("zh-CN")}</small></div><button className="secondary-action" onClick={exportReport}><FileText size={16} />导出报告</button></div><div className="record-evidence"><span><small>已完成阶段</small><strong>{selected.steps.length} 项</strong></span><span><small>匹配汞线</small><strong>{markerCount} 条</strong></span><span><small>记录状态</small><strong>{selected.quality}</strong></span></div>{imageEntries.length > 0 && <div className="record-images">{imageEntries.map(([slot, url]) => <figure key={slot}><Image src={url} alt="汞灯零级与单侧一级原始照片" width={800} height={450} unoptimized /><figcaption>{slot === "primary" ? "主测照片" : slot === "repeat_2" ? "重复照片 2" : "重复照片 3"}</figcaption></figure>)}</div>}<div className="timeline">{selected.steps.length ? selected.steps.map((step, index) => <div className="timeline-item" key={step}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step}</strong><p>{step === "d 反演及不确定度评估" ? `${selected.resultLabel} = ${selected.resultValue}` : "该阶段的参数和证据已保存到云端记录。"}</p></div>{index < selected.steps.length - 1 && <i />}</div>) : <div className="record-empty compact"><History size={28} /><strong>实验尚未开始</strong></div>}</div><div className="record-diagnosis"><strong>异常诊断与复核意见</strong><p>{selected.diagnosis || "未填写异常诊断或复核意见。"}</p></div></> : <div className="record-empty"><Microscope size={34} /><strong>选择一条记录开始回放</strong></div>}</section></div>
   </div>;
 }
 

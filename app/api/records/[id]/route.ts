@@ -12,7 +12,7 @@ export async function GET(_request: Request, context: RouteContext) {
     if (!user) return noStoreJson({ error: "请先登录后读取实验记录" }, { status: 401 });
     const { id } = await context.params;
     const [record] = await getDb().select().from(experiments)
-      .where(and(eq(experiments.id, id), eq(experiments.userId, user.userId)))
+      .where(and(eq(experiments.id, id), eq(experiments.userId, user.userId), eq(experiments.task, "A")))
       .limit(1);
     if (!record) return noStoreJson({ error: "未找到记录" }, { status: 404 });
     return noStoreJson({ record: serializeRecord(record) });
@@ -34,7 +34,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     const [current] = await getDb().select().from(experiments)
-      .where(and(eq(experiments.id, id), eq(experiments.userId, user.userId)))
+      .where(and(eq(experiments.id, id), eq(experiments.userId, user.userId), eq(experiments.task, "A")))
       .limit(1);
     if (!current) return noStoreJson({ error: "未找到记录" }, { status: 404 });
     if (current.lastMutationId === mutationId) return noStoreJson({ record: serializeRecord(current) });
@@ -51,12 +51,13 @@ export async function PATCH(request: Request, context: RouteContext) {
     }).where(and(
       eq(experiments.id, id),
       eq(experiments.userId, user.userId),
+      eq(experiments.task, "A"),
       eq(experiments.version, baseVersion),
     )).returning();
 
     if (!record) {
       const [latest] = await getDb().select().from(experiments)
-        .where(and(eq(experiments.id, id), eq(experiments.userId, user.userId)))
+        .where(and(eq(experiments.id, id), eq(experiments.userId, user.userId), eq(experiments.task, "A")))
         .limit(1);
       return noStoreJson({ error: "另一台设备已保存更新，已采用最新版本", record: latest ? serializeRecord(latest) : undefined }, { status: 409 });
     }
