@@ -35,3 +35,14 @@ export async function PUT(request: Request) {
     return noStoreJson({ error: error instanceof Error ? error.message : "流程保存失败" }, { status: 503 });
   }
 }
+
+export async function DELETE() {
+  try {
+    const user = await getChatGPTUser();
+    if (!user) return noStoreJson({ error: "请先登录后重置实验流程" }, { status: 401 });
+    await getDb().delete(experimentJourneys).where(eq(experimentJourneys.userId, user.userId));
+    return noStoreJson({ journey: structuredClone(emptyJourney) });
+  } catch (error) {
+    return noStoreJson({ error: error instanceof Error ? error.message : "实验流程重置失败" }, { status: 503 });
+  }
+}
