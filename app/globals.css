@@ -37,6 +37,9 @@ button, input { font: inherit; } button { cursor: pointer; }
 .main-nav button:hover, .main-nav button.active { color: white; }
 .main-nav button.active::after { content: ""; height: 3px; border-radius: 3px 3px 0 0; background: #4f8dff; position: absolute; bottom: 0; left: 13px; right: 13px; }
 .ghost-button { display: flex; align-items: center; gap: 7px; color: #b8c6d8; border: 1px solid #324761; background: #0d213a; padding: 9px 12px; border-radius: 10px; font-size: 14px; }
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.auth-link { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; color: #d9ebff; background: #14385e; border: 1px solid #315b82; border-radius: 9px; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.auth-notice { margin: 0 0 16px; padding: 11px 14px; color: #375b79; background: #eef7ff; border: 1px solid #cee4f6; border-radius: 10px; font-size: 13px; }.auth-notice a { color: #0870d8; font-weight: 700; }
 .workspace-heading { max-width: 1400px; margin: 0 auto; padding: 36px clamp(20px, 4vw, 56px) 22px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .eyebrow { margin: 0 0 8px; color: #0870f4; font-size: 14px; font-weight: 700; letter-spacing: .08em; }
 h1 { margin: 0; max-width: 760px; font-size: clamp(25px, 3vw, 38px); line-height: 1.23; letter-spacing: -.035em; }
@@ -575,6 +578,7 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
   .processing-timeline { grid-template-columns: 1fr 1fr; gap: 18px 0; }.processing-timeline > div:nth-child(2) { border-right: 0; }
   .analysis-card-heading.wide { align-items: flex-start; flex-wrap: wrap; }
   .diagnostic-strip { grid-template-columns: 1fr; }
+  .topbar-actions { margin-left: 0; }.auth-link { min-height: 34px; padding-inline: 9px; font-size: 12px; }
 }
 @media (max-width: 540px) {
   .flow-banner { align-items: stretch; flex-direction: column; }.flow-banner button { justify-content: center; }

@@ -5,7 +5,7 @@ import {
   Aperture, ArrowLeft, ArrowRight, BarChart3, BookOpen, Bot, Camera, Check,
   CheckCircle2, ChevronRight, CircleAlert, CircleHelp, ClipboardCheck, Clock3,
   Download, FileText, FlaskConical, History, Home,
-  Lightbulb, ListChecks, MessageCircle, Microscope, Play, RotateCcw, Save,
+  Lightbulb, ListChecks, LogIn, LogOut, MessageCircle, Microscope, Play, RotateCcw, Save,
   ScanLine, Send, SlidersHorizontal, Target, Telescope, Upload, Waves,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -283,7 +283,7 @@ async function analyzeImageFile(file: File): Promise<SpectrumSource> {
   };
 }
 
-function AppHeader({ active, onChange }: { active: ModuleId; onChange: (id: ModuleId) => void }) {
+function AppHeader({ active, onChange, authenticated, authHref, authLabel, viewerName }: { active: ModuleId; onChange: (id: ModuleId) => void; authenticated: boolean; authHref: string; authLabel: string; viewerName: string | null }) {
   return (
     <header className="topbar">
       <button className="brand" onClick={() => onChange("home")} aria-label="返回首页">
@@ -293,7 +293,10 @@ function AppHeader({ active, onChange }: { active: ModuleId; onChange: (id: Modu
       <nav className="main-nav" aria-label="主导航">
         {navItems.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onChange(item.id)}>{item.label}</button>)}
       </nav>
-      <button className="ghost-button" onClick={() => toast.info("主流程：虚拟预习 → 采集质检 → 零级与汞线匹配 → d 与不确定度 → 云端复盘")}><CircleHelp size={17} /> 流程帮助</button>
+      <div className="topbar-actions">
+        <button className="ghost-button" onClick={() => toast.info("主流程：虚拟预习 → 采集质检 → 零级与汞线匹配 → d 与不确定度 → 云端复盘")}><CircleHelp size={17} /> 流程帮助</button>
+        <a className="auth-link" href={authHref} target="_top" title={viewerName ?? authLabel}>{authenticated ? <LogOut size={16} /> : <LogIn size={16} />}{authLabel}</a>
+      </div>
     </header>
   );
 }
@@ -476,11 +479,12 @@ function SimulatorModule({ journey, navigate, updateJourney }: { journey: Experi
   );
 }
 
-function AssistantModule({ journey, navigate }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void }) {
+function AssistantModule({ journey, navigate, authenticated, authHref }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void; authenticated: boolean; authHref: string }) {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string; source?: string }[]>([{ role: "assistant", text: "你好，我是你的 AI 助教。我重点辅导分光计与光栅实验，也可以帮助你理解课程知识、润色文字和分析编程问题。直接告诉我你现在遇到的困难。", source: "AI 助教 · 物理实验与通用问答" }]);
   const [sending, setSending] = useState(false);
   const ask = async (preset?: string) => {
+    if (!authenticated) return toast.info("登录后即可使用 AI 助教");
     const value = (preset ?? question).trim(); if (!value || sending) return;
     setMessages((items) => [...items, { role: "user", text: value }]); setQuestion(""); setSending(true);
     const context = `当前实验状态：预习${journey.prelab.capturedLines >= 2 ? "已完成" : "未完成"}；照片${journey.capture.imageCount}张，曝光${journey.capture.exposureOk ? "通过" : "未通过"}，清晰度${journey.capture.sharpnessOk ? "通过" : "未通过"}；零级${journey.capture.zeroX ?? "未找到"}；匹配汞线${journey.identification.matchedLines}/5；黄双线${journey.identification.yellowDoubletResolved ? "已分开" : "未分开"}；反演${journey.inversion.reportable ? "可报告" : `被阻塞：${journey.inversion.blockReason}` }。助教只能解释，不能更改完成状态。`;
@@ -489,8 +493,9 @@ function AssistantModule({ journey, navigate }: { journey: ExperimentJourney; na
     finally { setSending(false); }
   };
   return <div className="module-page"><FlowBanner stage="实验助教 · 只读当前流程数据" navigate={navigate} /><PageHeading eyebrow="AI 助教 · 当前实验上下文" title="解释异常，但不替你完成实验。" description={`当前匹配 ${journey.identification.matchedLines}/5 条汞线；${journey.inversion.reportable ? "反演结果已通过检查" : journey.inversion.blockReason}`} />
+    {!authenticated && <p className="auth-notice">匿名访问可浏览实验内容；<a href={authHref} target="_top">登录 ChatGPT</a> 后可使用 AI 助教并保存个人实验记录。</p>}
     <div className="assistant-grid"><aside className="question-bank panel"><div className="panel-title"><div><span className="step-index"><BookOpen size={15} /></span><h2>试试这样问</h2></div></div><div className="quick-questions">{["为什么黄光是两条？", "帮我制定一份复习计划", "解释一个陌生概念", "帮我润色一段文字", "给我一个编程思路"].map((text) => <button key={text} onClick={() => ask(text)}><MessageCircle size={15} />{text}<ChevronRight size={15} /></button>)}</div><div className="knowledge-scope"><strong>能力范围</strong><span>分光计实验</span><span>物理实验</span><span>课程答疑</span><span>写作润色</span><span>编程分析</span></div></aside>
-      <section className="chat-panel panel"><div className="chat-status"><span><i />AI 助教在线</span><em>物理实验 · 通用问答</em></div><div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}><span>{message.role === "assistant" ? <Bot size={17} /> : "你"}</span><div>{message.role === "assistant" ? <AssistantAnswer>{message.text}</AssistantAnswer> : <p>{message.text}</p>}{message.source && <small><BookOpen size={12} />{message.source}</small>}</div></div>)}{sending && <div className="message assistant"><span><Bot size={17} /></span><div><p>AI 助教正在分析问题…</p></div></div>}</div><form className="chat-input" onSubmit={(e) => { e.preventDefault(); ask(); }}><textarea value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="问分光计实验、课程、写作、编程或日常问题…" /><button type="submit" aria-label="发送问题"><Send size={18} /></button></form><p className="chat-hint">AI 可能出错，重要信息请结合可靠来源核实。</p></section></div>
+      <section className="chat-panel panel"><div className="chat-status"><span><i />{authenticated ? "AI 助教在线" : "登录后启用 AI 助教"}</span><em>物理实验 · 通用问答</em></div><div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}><span>{message.role === "assistant" ? <Bot size={17} /> : "你"}</span><div>{message.role === "assistant" ? <AssistantAnswer>{message.text}</AssistantAnswer> : <p>{message.text}</p>}{message.source && <small><BookOpen size={12} />{message.source}</small>}</div></div>)}{sending && <div className="message assistant"><span><Bot size={17} /></span><div><p>AI 助教正在分析问题…</p></div></div>}</div><form className="chat-input" onSubmit={(e) => { e.preventDefault(); ask(); }}><textarea value={question} onChange={(e) => setQuestion(e.target.value)} disabled={!authenticated} placeholder={authenticated ? "问分光计实验、课程、写作、编程或日常问题…" : "登录后即可提问"} /><button type="submit" aria-label="发送问题" disabled={!authenticated}><Send size={18} /></button></form><p className="chat-hint">AI 可能出错，重要信息请结合可靠来源核实。</p></section></div>
   </div>;
 }
 
@@ -568,12 +573,14 @@ async function sourceFromSyncedImage(url: string) {
 function useExperimentSync({
   task,
   enabled,
+  authenticated,
   snapshot,
   pendingImagesRef,
   onRemoteRecord,
 }: {
   task: ExperimentTask;
   enabled: boolean;
+  authenticated: boolean;
   snapshot: RecordSnapshot;
   pendingImagesRef: React.MutableRefObject<PendingImages>;
   onRemoteRecord: (record: SavedRecord) => Promise<void>;
@@ -589,7 +596,7 @@ function useExperimentSync({
   const onRemoteRecordRef = useRef(onRemoteRecord);
   const runSyncRef = useRef<(task: ExperimentTask) => Promise<void>>(async () => undefined);
   const phaseRef = useRef<SyncPhase>("loading");
-  const [phase, setPhase] = useState<SyncPhase>("loading");
+  const [phase, setPhase] = useState<SyncPhase>(authenticated ? "loading" : "idle");
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [loadRevision, setLoadRevision] = useState(0);
@@ -618,6 +625,7 @@ function useExperimentSync({
   }, [changePhase]);
 
   const runSync = useCallback(async (taskToSync: ExperimentTask) => {
+    if (!authenticated) return;
     const currentSnapshot = latestSnapshotRef.current[taskToSync];
     if (!currentSnapshot || syncingRef.current[taskToSync]) return;
     syncingRef.current[taskToSync] = true;
@@ -671,11 +679,16 @@ function useExperimentSync({
         setTimeout(() => void runSyncRef.current(taskToSync), 0);
       }
     }
-  }, [adoptRecord, changePhase, pendingImagesRef]);
+  }, [adoptRecord, authenticated, changePhase, pendingImagesRef]);
   runSyncRef.current = runSync;
 
   useEffect(() => {
     let cancelled = false;
+    if (!authenticated) {
+      changePhase("idle");
+      setErrorMessage("");
+      return;
+    }
     if (loadedRef.current[task]) {
       changePhase(metaRef.current[task] ? "synced" : "idle");
       return;
@@ -699,19 +712,20 @@ function useExperimentSync({
         }
       });
     return () => { cancelled = true; };
-  }, [task, adoptRecord, changePhase]);
+  }, [task, authenticated, adoptRecord, changePhase]);
 
   useEffect(() => {
-    if (!enabled || !loadedRef.current[task] || suppressRef.current.has(task)) return;
+    if (!authenticated || !enabled || !loadedRef.current[task] || suppressRef.current.has(task)) return;
     const signature = JSON.stringify(snapshot);
     if (signature === lastSavedSignatureRef.current[task]) return;
     changePhase("pending");
     if (timersRef.current[task]) clearTimeout(timersRef.current[task]);
     timersRef.current[task] = setTimeout(() => void runSyncRef.current(task), 800);
     return () => { if (timersRef.current[task]) clearTimeout(timersRef.current[task]); };
-  }, [task, enabled, snapshot, loadRevision, changePhase]);
+  }, [task, enabled, authenticated, snapshot, loadRevision, changePhase]);
 
   useEffect(() => {
+    if (!authenticated) return;
     const pullLatest = async () => {
       const meta = metaRef.current[task];
       if (!meta || phaseRef.current === "pending" || phaseRef.current === "saving" || phaseRef.current === "retrying") return;
@@ -726,7 +740,7 @@ function useExperimentSync({
     const onFocus = () => void pullLatest();
     window.addEventListener("focus", onFocus);
     return () => { clearInterval(interval); window.removeEventListener("focus", onFocus); };
-  }, [task, adoptRecord]);
+  }, [task, authenticated, adoptRecord]);
 
   const syncNow = useCallback(() => {
     if (timersRef.current[task]) clearTimeout(timersRef.current[task]);
@@ -745,7 +759,7 @@ function useExperimentSync({
   return { phase, lastSyncedAt, errorMessage, syncNow, resetSync };
 }
 
-function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney }: { analyzeSignal?: number; journey: ExperimentJourney; navigate: (id: ModuleId) => void; updateJourney: (patch: Partial<ExperimentJourney>) => void }) {
+function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, authenticated }: { analyzeSignal?: number; journey: ExperimentJourney; navigate: (id: ModuleId) => void; updateJourney: (patch: Partial<ExperimentJourney>) => void; authenticated: boolean }) {
   const task: ExperimentTask = "A";
   const [detector, setDetector] = useState<DetectorOptions>({ prominence: .018, minDistancePx: 3 });
   const [aSource, setASource] = useState<SpectrumSource | null>(() => analyzeSignal > 0 ? buildSampleSource() : null);
@@ -879,8 +893,8 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney }:
     }
   }, []);
 
-  const sync = useExperimentSync({ task, enabled: Boolean(aImage), snapshot: recordSnapshot, pendingImagesRef, onRemoteRecord: hydrateRecord });
-  const syncLabel = sync.phase === "loading" ? "正在读取云端记录" : sync.phase === "pending" ? "有更改待同步" : sync.phase === "saving" ? "正在同步" : sync.phase === "retrying" ? "同步失败，正在重试" : sync.phase === "error" ? "同步失败" : sync.phase === "synced" && sync.lastSyncedAt ? `已同步 ${new Date(sync.lastSyncedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "自动同步已就绪";
+  const sync = useExperimentSync({ task, enabled: Boolean(aImage), authenticated, snapshot: recordSnapshot, pendingImagesRef, onRemoteRecord: hydrateRecord });
+  const syncLabel = !authenticated ? "登录后可保存到云端" : sync.phase === "loading" ? "正在读取云端记录" : sync.phase === "pending" ? "有更改待同步" : sync.phase === "saving" ? "正在同步" : sync.phase === "retrying" ? "同步失败，正在重试" : sync.phase === "error" ? "同步失败" : sync.phase === "synced" && sync.lastSyncedAt ? `已同步 ${new Date(sync.lastSyncedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "自动同步已就绪";
   useEffect(() => {
     if (hasResult && sync.phase === "synced" && sync.lastSyncedAt) updateJourney({ archive: { synced: true, recordId: null, syncedAt: sync.lastSyncedAt } });
   }, [hasResult, sync.phase, sync.lastSyncedAt, updateJourney]);
@@ -923,7 +937,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney }:
         {blockReason && aImage && <p className="inline-warning"><CircleAlert size={15} />{blockReason}</p>}
       </section>
     </div>
-    <section className="panel overview-panel"><div><h2>结果总览</h2><p>{hasResult ? "关键参数、最终结果与残差会自动同步。" : "上传图片后即开始保存实验过程，完成计算后自动更新结果。"}</p><span className={`sync-state ${sync.phase}`} aria-live="polite">{sync.phase === "error" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{syncLabel}</span>{sync.phase === "error" && sync.errorMessage && <small className="sync-error">{sync.errorMessage}</small>}</div><div className="overview-metrics">{summary.map(([label, value]) => <span key={label}><small>{label}</small><strong>{value}</strong></span>)}</div><button className="secondary-action" onClick={() => void sync.syncNow()} disabled={!aImage || sync.phase === "saving" || sync.phase === "retrying"}><Save size={16} />{sync.phase === "error" ? "立即重试" : "立即同步"}</button></section>
+    <section className="panel overview-panel"><div><h2>结果总览</h2><p>{!authenticated ? "匿名状态可完成本地分析；登录后自动保存实验过程。" : hasResult ? "关键参数、最终结果与残差会自动同步。" : "上传图片后即开始保存实验过程，完成计算后自动更新结果。"}</p><span className={`sync-state ${sync.phase}`} aria-live="polite">{sync.phase === "error" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{syncLabel}</span>{sync.phase === "error" && sync.errorMessage && <small className="sync-error">{sync.errorMessage}</small>}</div><div className="overview-metrics">{summary.map(([label, value]) => <span key={label}><small>{label}</small><strong>{value}</strong></span>)}</div><button className="secondary-action" onClick={() => void sync.syncNow()} disabled={!authenticated || !aImage || sync.phase === "saving" || sync.phase === "retrying"}><Save size={16} />{sync.phase === "error" ? "立即重试" : "立即同步"}</button></section>
     <section className="panel review-note-panel"><div className="analysis-card-heading"><span><ClipboardCheck size={18} /></span><div><h2>异常诊断与复核意见</h2><p>记录异常现象、可能原因和复核结论；输入内容会随实验记录自动同步。</p></div></div><textarea value={diagnosis} maxLength={2000} onChange={(event) => setDiagnosis(event.target.value)} placeholder="例如：黄色双线未完全分离，已重新调整狭缝并复测。" /></section>
     <div className="analysis-results-grid">
       <section className="panel intensity-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>强度剖面与谱线标注</h2><p>曲线、候选峰和人工参考标记来自当前图像数据。</p></div></div><IntensityChart image={aImage} markers={aMarkers} title="光谱横向强度剖面" /></section>
@@ -963,10 +977,11 @@ function GuideModule({ journey, navigate }: { journey: ExperimentJourney; naviga
   </div>;
 }
 
-function RecordsModule({ navigate }: { navigate: (id: ModuleId) => void }) {
+function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: ModuleId) => void; authenticated: boolean; authHref: string }) {
   const [records, setRecords] = useState<SavedRecord[]>([]); const [loading, setLoading] = useState(true); const [selected, setSelected] = useState<SavedRecord | null>(null);
   const [errorMessage, setErrorMessage] = useState(""); const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const refresh = useCallback(async () => {
+    if (!authenticated) { setLoading(false); return; }
     try {
       const { records: latest } = await requestRecordJson<{ records: SavedRecord[] }>("/api/records?limit=100", undefined, 2);
       setRecords(latest);
@@ -975,14 +990,15 @@ function RecordsModule({ navigate }: { navigate: (id: ModuleId) => void }) {
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "实验记录读取失败");
     } finally { setLoading(false); }
-  }, []);
+  }, [authenticated]);
   useEffect(() => {
+    if (!authenticated) { setLoading(false); return; }
     void refresh();
     const interval = setInterval(() => void refresh(), 3000);
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => { clearInterval(interval); window.removeEventListener("focus", onFocus); };
-  }, [refresh]);
+  }, [authenticated, refresh]);
   const exportCsv = () => { const rows = [["最后更新", "任务", "光源", "状态", "结果", "质量"], ...records.map((r) => [new Date(r.updatedAt).toLocaleString("zh-CN"), r.task, r.source, r.status === "draft" ? "进行中" : r.status === "needs_review" ? "需复核" : "已完成", r.resultValue, r.quality])]; downloadFile("spectra-experiments.csv", rows.map((row) => row.map((v) => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"), "text/csv"); };
   const exportReport = () => {
     if (!selected) return;
@@ -994,6 +1010,7 @@ function RecordsModule({ navigate }: { navigate: (id: ModuleId) => void }) {
   };
   const markerCount = Array.isArray(selected?.payload.referenceMarkers) ? selected.payload.referenceMarkers.length : 0;
   const imageEntries = selected ? Object.entries(selected.imageUrls) as [ExperimentImageSlot, string][] : [];
+  if (!authenticated) return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="登录后查看你的实验记录。" description="匿名访问不会读取或保存个人数据。登录后可在不同设备间同步记录、图片与实验报告。" action={<a className="primary-action" href={authHref} target="_top"><LogIn size={16} />登录 ChatGPT</a>} /><div className="panel record-empty"><History size={34} /><strong>个人记录受到登录保护</strong><p>站点其余实验模块仍可匿名浏览和操作。</p></div></div>;
   return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="结果不是终点，证据链才是。" description="打开一次记录，沿五阶段证据、不确定度预算和异常诊断回看；支持导出 CSV 与实验报告。" action={<button className="secondary-action" onClick={exportCsv} disabled={!records.length}><Download size={16} />导出全部 CSV</button>} />
     <div className={`records-sync ${errorMessage ? "error" : ""}`} aria-live="polite">{errorMessage ? <><CircleAlert size={15} /><span>{errorMessage}</span><button onClick={() => void refresh()}>重新加载</button></> : <><CheckCircle2 size={15} /><span>{lastUpdated ? `云端记录已更新 · ${new Date(lastUpdated).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "正在连接云端记录"}</span></>}</div>
     <div className="records-grid"><section className="panel record-list"><div className="panel-title"><div><span className="step-index"><History size={14} /></span><h2>我的实验</h2></div><span>{records.length} 条</span></div>{loading ? <div className="record-empty">正在读取实验记录…</div> : records.length ? records.map((record) => <button key={record.id} className={selected?.id === record.id ? "active" : ""} onClick={() => setSelected(record)}><span className="record-source"><Waves size={18} /></span><div><strong>{record.resultLabel}<small>{record.resultValue}</small></strong><p><Clock3 size={12} />{new Date(record.updatedAt).toLocaleString("zh-CN")} · {record.source}</p></div><em className={record.status === "completed" ? "good" : ""}>{record.status === "draft" ? "进行中" : record.status === "needs_review" ? "需复核" : "已完成"}</em></button>) : <div className="record-empty"><History size={30} /><strong>还没有实验记录</strong><p>上传光谱图片后，实验过程会自动同步并出现在这里。</p></div>}</section>
@@ -1007,7 +1024,7 @@ declare global {
   interface Document { modelContext?: { registerTool: (tool: { name: string; title: string; description: string; inputSchema: object; annotations: { readOnlyHint: boolean; untrustedContentHint: boolean }; execute: (input: unknown) => unknown }, options?: { signal?: AbortSignal }) => void | Promise<void> } }
 }
 
-export default function SpectraApp() {
+export default function SpectraApp({ authenticated, viewerName, authHref, authLabel }: { authenticated: boolean; viewerName: string | null; authHref: string; authLabel: string }) {
   const [active, setActive] = useState<ModuleId>("home"); const [analyzeSignal, setAnalyzeSignal] = useState(0);
   const [journey, setJourney] = useState<ExperimentJourney>(() => structuredClone(emptyJourney));
   const journeyLoadedRef = useRef(false);
@@ -1027,6 +1044,7 @@ export default function SpectraApp() {
     });
   }, []);
   useEffect(() => {
+    if (!authenticated) { journeyLoadedRef.current = false; return; }
     fetch("/api/journey", { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error("流程状态读取失败");
       const data = await response.json() as { journey: ExperimentJourney };
@@ -1034,7 +1052,7 @@ export default function SpectraApp() {
       journeySavedSignatureRef.current = JSON.stringify({ ...restored, updatedAt: 0 });
       setJourney(restored);
     }).catch(() => toast.warning("云端流程暂不可用，本页仍可继续操作")).finally(() => { journeyLoadedRef.current = true; });
-  }, []);
+  }, [authenticated]);
   useEffect(() => {
     if (!journeyLoadedRef.current) return;
     const signature = JSON.stringify({ ...journey, updatedAt: 0 });
@@ -1055,5 +1073,5 @@ export default function SpectraApp() {
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "guide" && <GuideModule journey={journey} navigate={setActive} />}{active === "records" && <RecordsModule navigate={setActive} />}<footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer><Toaster position="top-center" richColors /></main>;
+  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} authenticated={authenticated} authHref={authHref} authLabel={authLabel} viewerName={viewerName} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} authenticated={authenticated} authHref={authHref} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} navigate={setActive} updateJourney={updateJourney} authenticated={authenticated} />}{active === "guide" && <GuideModule journey={journey} navigate={setActive} />}{active === "records" && <RecordsModule navigate={setActive} authenticated={authenticated} authHref={authHref} />}<footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer><Toaster position="top-center" richColors /></main>;
 }

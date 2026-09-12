@@ -1,3 +1,5 @@
+import { getChatGPTUser } from "@/app/chatgpt-auth";
+
 const referenceNotes = [
   "汞灯黄色谱线包含 576.96 nm 与 579.07 nm 两条相近跃迁。实验中应先放大并分别对中，再记录各自读数。",
   "零级方向是入射光不发生偏转的参考方向。先对准零级，再分别测左右一级谱线并取半差，可以削弱仪器零位偏差。",
@@ -31,6 +33,9 @@ function normalizeAnswer(content: string) {
 }
 
 export async function POST(request: Request) {
+  const user = await getChatGPTUser();
+  if (!user) return Response.json({ error: "请先登录后使用 AI 助教" }, { status: 401 });
+
   const body = (await request.json()) as { question?: string };
   const question = body.question?.trim() ?? "";
 
