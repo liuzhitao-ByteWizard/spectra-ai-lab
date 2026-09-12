@@ -187,7 +187,7 @@ export function fitGratingFromPixels(
   const ucUm = Math.sqrt(budget.reduce((sum, item) => sum + (item.standardUncertaintyUm ?? 0) ** 2, 0));
   const profileRelativeWidth = (profileHigh - profileLow) / Math.max(best.dNm, 1);
   const reasons: string[] = [];
-  if (Math.abs(correlation) > .9995) reasons.push("d 与 L 高度相关");
+  if (Math.abs(correlation) > .99999) reasons.push("d 与 L 高度相关");
   if (profileRelativeWidth > .2) reasons.push("剖面置信区间过宽");
   if (boundaryHit) reasons.push("拟合命中参数边界");
   const distortionNumerator = best.t.reduce((sum, t, index) => sum + t * t * best.residualPx[index], 0);

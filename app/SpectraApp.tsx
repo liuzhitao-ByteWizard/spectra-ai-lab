@@ -745,7 +745,7 @@ function useExperimentSync({
   return { phase, lastSyncedAt, errorMessage, syncNow, resetSync };
 }
 
-function AnalysisModule({ analyzeSignal = 0, navigate, updateJourney }: { analyzeSignal?: number; navigate: (id: ModuleId) => void; updateJourney: (patch: Partial<ExperimentJourney>) => void }) {
+function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney }: { analyzeSignal?: number; journey: ExperimentJourney; navigate: (id: ModuleId) => void; updateJourney: (patch: Partial<ExperimentJourney>) => void }) {
   const task: ExperimentTask = "A";
   const [detector, setDetector] = useState<DetectorOptions>({ prominence: .018, minDistancePx: 3 });
   const [aSource, setASource] = useState<SpectrumSource | null>(() => analyzeSignal > 0 ? buildSampleSource() : null);
@@ -756,6 +756,7 @@ function AnalysisModule({ analyzeSignal = 0, navigate, updateJourney }: { analyz
   const [aComplete, setAComplete] = useState(analyzeSignal > 0);
   const [busy, setBusy] = useState(false);
   const [diagnosis, setDiagnosis] = useState("");
+  const [repeatSources, setRepeatSources] = useState<SpectrumSource[]>([]);
   const pendingImagesRef = useRef<PendingImages>({ A: {}, B: {} });
 
   const aImage = useMemo(() => aSource ? applyMercuryFiveLineModel(detectSpectrumPeaks(aSource, detector)) : null, [aSource, detector]);
@@ -767,16 +768,21 @@ function AnalysisModule({ analyzeSignal = 0, navigate, updateJourney }: { analyz
   const loadSample = () => {
     sync.resetSync();
     const sample = buildSampleSource(); const positions = SPECTRAL_LIBRARY.mercury.map((line) => ({ wavelengthNm: line.wavelengthNm, xRatio: (100 + 4000 * Math.tan(Math.asin(line.wavelengthNm / 3333))) / sample.width }));
-    setASource(sample); setAMarkers(positions); setZeroX(100); setScaleL(4000); setAComplete(true); setSelectedWavelength(546.07);
+    setASource(sample); setRepeatSources([]); setAMarkers(positions); setZeroX(100); setScaleL(4000); setAComplete(true); setSelectedWavelength(546.07);
   };
-  const upload = async (file?: File) => {
-    if (!file) return; setBusy(true);
+  const upload = async (files?: FileList | File[]) => {
+    const selectedFiles = files ? Array.from(files).slice(0, 3) : [];
+    if (!selectedFiles.length) return; setBusy(true);
     try {
-      const source = await analyzeImageFile(file);
+      const sources = await Promise.all(selectedFiles.map(analyzeImageFile));
+      const source = sources[0];
       const detected = detectSpectrumPeaks(source, detector);
       const analyzed = applyMercuryFiveLineModel(detected);
       const automaticMarkers = autoMatchMercuryPeaks(analyzed);
-      pendingImagesRef.current.A.primary = file; setASource(source); setAMarkers(automaticMarkers); setAComplete(false);
+      pendingImagesRef.current.A.primary = selectedFiles[0];
+      if (selectedFiles[1]) pendingImagesRef.current.A.repeat_2 = selectedFiles[1];
+      if (selectedFiles[2]) pendingImagesRef.current.A.repeat_3 = selectedFiles[2];
+      setASource(source); setRepeatSources(sources.slice(1)); setAMarkers(automaticMarkers); setAComplete(false);
       const zero = detectZeroOrder(analyzed, analyzed.peaks);
       if (zero) setZeroX(zero.x);
       toast.success(automaticMarkers.length === 5 && zero ? "已定位零级并匹配 5 条汞灯谱线" : "图像读取完成，但仍有自动检查未通过");
@@ -794,31 +800,47 @@ function AnalysisModule({ analyzeSignal = 0, navigate, updateJourney }: { analyz
   };
   const removeMarker = (wavelengthNm: number) => setAMarkers((items) => items.filter((item) => item.wavelengthNm !== wavelengthNm));
 
+  const repeatDValues = useMemo(() => repeatSources.flatMap((source) => {
+    const image = applyMercuryFiveLineModel(detectSpectrumPeaks(source, detector));
+    const markers = autoMatchMercuryPeaks(image);
+    const zero = detectZeroOrder(image, image.peaks);
+    if (!zero || markers.length !== 5 || image.overexposed || !image.sharpnessOk) return [];
+    try {
+      const result = fitGratingFromPixels(markers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * image.width, uncertaintyPx: .35 })), zero.x, image.width, { zeroUncertaintyPx: zero.uncertaintyPx, wavelengthUncertaintyNm: .01 });
+      return result.reportable ? [result.dUm] : [];
+    } catch { return []; }
+  }), [repeatSources, detector]);
+
   const aResult = useMemo(() => {
     if (!aComplete || !aImage || aMarkers.length < 4) return null;
     try {
-      return fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), zeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01 });
+      const provisional = fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), zeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01 });
+      return fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), zeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01, repeatDValuesUm: [provisional.dUm, ...repeatDValues] });
     } catch { return null; }
-  }, [aComplete, aImage, aMarkers, zeroX, zeroDetection?.uncertaintyPx]);
+  }, [aComplete, aImage, aMarkers, zeroX, zeroDetection?.uncertaintyPx, repeatDValues]);
 
   const yellowDoubletResolved = aMarkers.some((item) => item.wavelengthNm === 576.96) && aMarkers.some((item) => item.wavelengthNm === 579.07) && (() => { const yellow = aMarkers.filter((item) => item.wavelengthNm >= 576); return yellow.length === 2 && Math.abs(yellow[1].xRatio - yellow[0].xRatio) * (aImage?.width ?? 0) >= 1.5; })();
-  const hasResult = Boolean(aResult?.reportable && aMarkers.length === 5 && yellowDoubletResolved && zeroDetection && aImage?.sharpnessOk && !aImage.overexposed);
-  const blockReason = !aImage ? "等待上传包含零级和单侧一级汞线的真实照片" : aImage.overexposed ? "照片过曝，请降低曝光后重拍" : !aImage.sharpnessOk ? "谱线不够清晰，请重新对焦后拍摄" : !zeroDetection ? "未找到零级，请扩大画面范围重新拍摄" : aMarkers.length < 5 ? "可靠匹配谱线不足 5 条" : !yellowDoubletResolved ? "黄色双线未清晰分开" : aResult && !aResult.reportable ? aResult.blockReason : "";
+  const repeatsValid = repeatSources.length === repeatDValues.length;
+  const hasResult = Boolean(aResult?.reportable && aMarkers.length === 5 && yellowDoubletResolved && zeroDetection && aImage?.sharpnessOk && !aImage.overexposed && repeatsValid);
+  const blockReason = !aImage ? "等待上传包含零级和单侧一级汞线的真实照片" : aImage.overexposed ? "照片过曝，请降低曝光后重拍" : !aImage.sharpnessOk ? "谱线不够清晰，请重新对焦后拍摄" : !zeroDetection ? "未找到零级，请扩大画面范围重新拍摄" : aMarkers.length < 5 ? "可靠匹配谱线不足 5 条" : !yellowDoubletResolved ? "黄色双线未清晰分开" : !repeatsValid ? "至少一张重复照片未通过零级、认线或质量检查" : aResult && !aResult.reportable ? aResult.blockReason : "";
   const status = !aImage ? "待上传" : hasResult ? "已完成" : blockReason ? "被阻塞" : "可计算";
 
   useEffect(() => {
     updateJourney({
-      capture: { imageCount: aImage ? 1 : 0, exposureOk: Boolean(aImage && !aImage.overexposed), sharpnessOk: Boolean(aImage?.sharpnessOk), zeroX: zeroDetection?.x ?? null, peakCount: aImage?.peaks.length ?? 0 },
+      capture: { imageCount: aImage ? 1 + repeatSources.length : 0, exposureOk: Boolean(aImage && !aImage.overexposed && repeatSources.every((item) => !item.overexposed)), sharpnessOk: Boolean(aImage?.sharpnessOk && repeatSources.every((item) => item.sharpnessOk)), zeroX: zeroDetection?.x ?? null, peakCount: aImage?.peaks.length ?? 0 },
       identification: { matchedLines: aMarkers.length, yellowDoubletResolved },
       inversion: { reportable: hasResult, dUm: hasResult && aResult ? aResult.dUm : null, expandedUncertaintyUm: hasResult && aResult ? aResult.expandedUncertaintyUm : null, correlation: aResult?.identifiability.correlation ?? null, profileLowUm: aResult?.identifiability.profileLowUm ?? null, profileHighUm: aResult?.identifiability.profileHighUm ?? null, boundaryHit: aResult?.identifiability.boundaryHit ?? false, blockReason: hasResult ? "" : blockReason },
     });
-  }, [aImage, aMarkers.length, yellowDoubletResolved, zeroDetection?.x, hasResult, aResult, blockReason, updateJourney]);
+  }, [aImage, repeatSources, aMarkers.length, yellowDoubletResolved, zeroDetection?.x, hasResult, aResult, blockReason, updateJourney]);
 
   const recordSnapshot = useMemo<RecordSnapshot>(() => {
     const resultValue = hasResult && aResult ? `${aResult.dUm.toFixed(3)} ± ${aResult.expandedUncertaintyUm.toFixed(3)} μm (k=2)` : "进行中";
     const needsReview = Boolean(aImage && !hasResult);
-    const steps = aImage ? ["图像读取", "强度提取", "峰值检测"] : [];
-    if (hasResult) steps.push("物理计算");
+    const steps: string[] = [];
+    if (journey.prelab.capturedLines >= 2 && journey.prelab.dUm !== null) steps.push("虚拟预习");
+    if (aImage && !aImage.overexposed && aImage.sharpnessOk) steps.push("光谱采集与质量检查");
+    if (zeroDetection && aMarkers.length === 5 && yellowDoubletResolved) steps.push("零级定位与汞线匹配");
+    if (hasResult) steps.push("d 反演及不确定度评估", "云端归档与实验复盘");
     const payload = {
       state: { detector, zeroX, scaleL, complete: aComplete, sample: Boolean(aSource?.sample) },
       referenceMarkers: aMarkers,
@@ -837,7 +859,7 @@ function AnalysisModule({ analyzeSignal = 0, navigate, updateJourney }: { analyz
       diagnosis,
       payload,
     };
-  }, [aResult, aImage, hasResult, detector, zeroX, scaleL, aComplete, aSource?.sample, aMarkers, diagnosis, zeroDetection, blockReason]);
+  }, [aResult, aImage, hasResult, detector, zeroX, scaleL, aComplete, aSource?.sample, aMarkers, diagnosis, zeroDetection, blockReason, journey.prelab]);
 
   const hydrateRecord = useCallback(async (record: SavedRecord) => {
     const state = record.payload.state && typeof record.payload.state === "object" ? record.payload.state as Record<string, unknown> : {};
@@ -850,12 +872,18 @@ function AnalysisModule({ analyzeSignal = 0, navigate, updateJourney }: { analyz
     if (typeof state.zeroX === "number") setZeroX(state.zeroX);
     if (typeof state.scaleL === "number") setScaleL(state.scaleL);
     setAComplete(Boolean(state.complete));
-    if (state.sample) setASource(buildSampleSource());
-    else setASource(record.imageUrls.primary ? await sourceFromSyncedImage(record.imageUrls.primary).catch(() => null) : null);
+    if (state.sample) { setASource(buildSampleSource()); setRepeatSources([]); }
+    else {
+      setASource(record.imageUrls.primary ? await sourceFromSyncedImage(record.imageUrls.primary).catch(() => null) : null);
+      setRepeatSources((await Promise.all([record.imageUrls.repeat_2, record.imageUrls.repeat_3].filter((url): url is string => Boolean(url)).map((url) => sourceFromSyncedImage(url).catch(() => null)))).filter((source): source is SpectrumSource => Boolean(source)));
+    }
   }, []);
 
   const sync = useExperimentSync({ task, enabled: Boolean(aImage), snapshot: recordSnapshot, pendingImagesRef, onRemoteRecord: hydrateRecord });
   const syncLabel = sync.phase === "loading" ? "正在读取云端记录" : sync.phase === "pending" ? "有更改待同步" : sync.phase === "saving" ? "正在同步" : sync.phase === "retrying" ? "同步失败，正在重试" : sync.phase === "error" ? "同步失败" : sync.phase === "synced" && sync.lastSyncedAt ? `已同步 ${new Date(sync.lastSyncedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "自动同步已就绪";
+  useEffect(() => {
+    if (hasResult && sync.phase === "synced" && sync.lastSyncedAt) updateJourney({ archive: { synced: true, recordId: null, syncedAt: sync.lastSyncedAt } });
+  }, [hasResult, sync.phase, sync.lastSyncedAt, updateJourney]);
 
   const runPrimary = () => {
     if (!aImage) return toast.warning("请先上传光谱照片");
@@ -870,7 +898,7 @@ function AnalysisModule({ analyzeSignal = 0, navigate, updateJourney }: { analyz
     sync.resetSync();
     setDiagnosis("");
     setDetector({ prominence: .018, minDistancePx: 3 }); setSelectedWavelength(546.07);
-    setASource(null); setAMarkers([]); setZeroX(100); setScaleL(4000); setAComplete(false);
+    setASource(null); setRepeatSources([]); setAMarkers([]); setZeroX(100); setScaleL(4000); setAComplete(false);
   };
   const summary = [
     ["零级位置", zeroDetection ? `${zeroDetection.x.toFixed(2)} px` : "未找到"], ["匹配汞线", `${aMarkers.length}/5 条`], ["光栅常数 d", hasResult && aResult ? `${aResult.dUm.toFixed(3)} μm` : "未形成结果"], ["d–L 相关系数", aResult ? aResult.identifiability.correlation.toFixed(5) : "—"],
@@ -889,7 +917,7 @@ function AnalysisModule({ analyzeSignal = 0, navigate, updateJourney }: { analyz
       <section className="panel calibration-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>光栅常数反演</h2><p>汞灯参考锁定五线；底层检测器可自适应任意数量谱线。</p></div><em className={`analysis-status ${status === "已完成" ? "done" : ""}`}>{status}</em></div>
         <SpectrumStage image={aImage} markers={aMarkers} onMark={addMarker} caption={aImage?.sample ? "示例图像 · 一级汞灯光谱" : "参考图像 · 已完成强度提取"} />
         <MarkerPicker selected={selectedWavelength} setSelected={setSelectedWavelength} markers={aMarkers} onClear={() => setAMarkers([])} onRemove={removeMarker} image={aImage} onCandidate={addMarker} />
-        <div className="analysis-actions"><label className="upload-button"><Upload size={17} />上传照片<input type="file" accept="image/*" hidden onChange={(event) => upload(event.target.files?.[0])} /></label><label className="camera-button"><Camera size={17} />手机拍摄<input type="file" accept="image/*" capture="environment" hidden onChange={(event) => upload(event.target.files?.[0])} /></label><button className="analyze-button" disabled={busy} onClick={runPrimary}><Play size={17} />{busy ? "处理中…" : "执行测量"}</button></div>
+        <div className="analysis-actions"><label className="upload-button"><Upload size={17} />上传 1–3 张照片<input type="file" accept="image/*" multiple hidden onChange={(event) => upload(event.target.files ?? undefined)} /></label><label className="camera-button"><Camera size={17} />手机拍摄<input type="file" accept="image/*" capture="environment" hidden onChange={(event) => upload(event.target.files ?? undefined)} /></label><button className="analyze-button" disabled={busy} onClick={runPrimary}><Play size={17} />{busy ? "处理中…" : "执行测量"}</button></div>
         {aImage && <div className="quality-row"><span><i className={!zeroDetection ? "warn" : ""} />{zeroDetection ? `零级 ${zeroDetection.x.toFixed(2)} px` : "未找到零级"}</span><span><i />候选峰 {aImage.peaks.length} 条</span><span><i className={aImage.overexposed ? "warn" : ""} />{aImage.overexposed ? "高光偏多" : "曝光正常"}</span><span><i className={!aImage.sharpnessOk ? "warn" : ""} />{aImage.sharpnessOk ? "清晰度通过" : "清晰度不足"}</span></div>}
         {aImage && aImage.peaks.length < 5 && <p className="inline-warning"><CircleAlert size={15} />当前只检测到 {aImage.peaks.length} 条候选峰；请降低突出度或确认黄双线清晰可分。</p>}
         {blockReason && aImage && <p className="inline-warning"><CircleAlert size={15} />{blockReason}</p>}
@@ -923,8 +951,9 @@ function GuideModule({ journey, navigate }: { journey: ExperimentJourney; naviga
     { done: journey.inversion.reportable, data: journey.inversion.reportable ? `d=${journey.inversion.dUm?.toFixed(3)} ± ${journey.inversion.expandedUncertaintyUm?.toFixed(3)} μm` : "尚未形成可报告结果", reason: journey.inversion.blockReason || "需通过可辨识性与边界检查" },
     { done: journey.archive.synced, data: journey.archive.syncedAt ? `已同步 · ${new Date(journey.archive.syncedAt).toLocaleString("zh-CN")}` : "尚未归档", reason: "需将结果与证据成功同步到云端记录" },
   ];
-  const firstIncomplete = Math.max(0, states.findIndex((state) => !state.done));
-  const [step, setStep] = useState(firstIncomplete === -1 ? 4 : firstIncomplete);
+  const firstIncompleteIndex = states.findIndex((state) => !state.done);
+  const firstIncomplete = firstIncompleteIndex === -1 ? 4 : firstIncompleteIndex;
+  const [step, setStep] = useState(firstIncomplete);
   const current = guideSteps[step], state = states[step];
   const completed = states.filter((item) => item.done).length;
   return <div className="module-page"><PageHeading eyebrow="实验 · 主流程" title="每一阶段都由真实数据自动判定。" description="这里是整站实验入口：状态、证据、阻塞原因与下一步操作均来自对应模块，不能手动打勾。" />
@@ -934,7 +963,7 @@ function GuideModule({ journey, navigate }: { journey: ExperimentJourney; naviga
   </div>;
 }
 
-function RecordsModule({ navigate, updateJourney }: { navigate: (id: ModuleId) => void; updateJourney: (patch: Partial<ExperimentJourney>) => void }) {
+function RecordsModule({ navigate }: { navigate: (id: ModuleId) => void }) {
   const [records, setRecords] = useState<SavedRecord[]>([]); const [loading, setLoading] = useState(true); const [selected, setSelected] = useState<SavedRecord | null>(null);
   const [errorMessage, setErrorMessage] = useState(""); const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const refresh = useCallback(async () => {
@@ -954,12 +983,15 @@ function RecordsModule({ navigate, updateJourney }: { navigate: (id: ModuleId) =
     window.addEventListener("focus", onFocus);
     return () => { clearInterval(interval); window.removeEventListener("focus", onFocus); };
   }, [refresh]);
-  useEffect(() => {
-    const completed = records.find((record) => record.task === "A" && record.status === "completed");
-    if (completed) updateJourney({ archive: { synced: true, recordId: completed.id, syncedAt: Number(new Date(completed.updatedAt)) } });
-  }, [records, updateJourney]);
   const exportCsv = () => { const rows = [["最后更新", "任务", "光源", "状态", "结果", "质量"], ...records.map((r) => [new Date(r.updatedAt).toLocaleString("zh-CN"), r.task, r.source, r.status === "draft" ? "进行中" : r.status === "needs_review" ? "需复核" : "已完成", r.resultValue, r.quality])]; downloadFile("spectra-experiments.csv", rows.map((row) => row.map((v) => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"), "text/csv"); };
-  const exportReport = () => { if (!selected) return; downloadFile(`spectra-${selected.id}.md`, `# 分光计实验报告\n\n- 创建时间：${new Date(selected.createdAt).toLocaleString("zh-CN")}\n- 最后更新：${new Date(selected.updatedAt).toLocaleString("zh-CN")}\n- 任务：${selected.task}\n- 光源：${selected.source}\n- 结果：${selected.resultValue}\n- 质量：${selected.quality}\n\n## 操作步骤\n\n${selected.steps.length ? selected.steps.map((step) => `- ${step}`).join("\n") : "暂无已完成步骤"}\n\n## 异常诊断与复核意见\n\n${selected.diagnosis || "未填写"}`, "text/markdown"); };
+  const exportReport = () => {
+    if (!selected) return;
+    const result = selected.payload.result && typeof selected.payload.result === "object" ? selected.payload.result as Record<string, unknown> : {};
+    const budget = Array.isArray(result.uncertaintyBudget) ? result.uncertaintyBudget as { label?: string; standardUncertaintyUm?: number | null; status?: string }[] : [];
+    const identification = result.identifiability && typeof result.identifiability === "object" ? result.identifiability as Record<string, unknown> : {};
+    const budgetText = budget.length ? budget.map((item) => `| ${item.label ?? "—"} | ${typeof item.standardUncertaintyUm === "number" ? `${item.standardUncertaintyUm.toFixed(4)} μm` : "—"} | ${item.status ?? "—"} |`).join("\n") : "暂无预算数据";
+    downloadFile(`spectra-${selected.id}.md`, `# 汞灯已知谱线光栅常数测量报告\n\n- 创建时间：${new Date(selected.createdAt).toLocaleString("zh-CN")}\n- 最后更新：${new Date(selected.updatedAt).toLocaleString("zh-CN")}\n- 光源：${selected.source}\n- 结果：${selected.resultValue}\n- 质量：${selected.quality}\n- 覆盖因子：k=${result.coverageFactor ?? 2}\n\n## 五阶段证据\n\n${selected.steps.length ? selected.steps.map((step) => `- ${step}`).join("\n") : "暂无已完成步骤"}\n\n## 不确定度预算\n\n| 分量 | 标准不确定度 | 状态 |\n| --- | ---: | --- |\n${budgetText}\n\n## 可辨识性与限制\n\n- d–L 相关系数：${typeof identification.correlation === "number" ? identification.correlation.toFixed(5) : "未评定"}\n- 95% 剖面区间：${typeof identification.profileLowUm === "number" && typeof identification.profileHighUm === "number" ? `${identification.profileLowUm.toFixed(3)}–${identification.profileHighUm.toFixed(3)} μm` : "未评定"}\n- 参数边界：${identification.boundaryHit ? "命中，结果不可报告" : "未命中"}\n- 数据限制：${(selected.payload.evidence as { limitation?: string } | undefined)?.limitation ?? "单张照片不评定重复性。"}\n\n## 异常诊断与复核意见\n\n${selected.diagnosis || "未填写"}`, "text/markdown");
+  };
   const markerCount = Array.isArray(selected?.payload.referenceMarkers) ? selected.payload.referenceMarkers.length : 0;
   const imageEntries = selected ? Object.entries(selected.imageUrls) as [ExperimentImageSlot, string][] : [];
   return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="结果不是终点，证据链才是。" description="打开一次记录，沿五阶段证据、不确定度预算和异常诊断回看；支持导出 CSV 与实验报告。" action={<button className="secondary-action" onClick={exportCsv} disabled={!records.length}><Download size={16} />导出全部 CSV</button>} />
@@ -1023,5 +1055,5 @@ export default function SpectraApp() {
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} navigate={setActive} updateJourney={updateJourney} />}{active === "guide" && <GuideModule journey={journey} navigate={setActive} />}{active === "records" && <RecordsModule navigate={setActive} updateJourney={updateJourney} />}<footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer><Toaster position="top-center" richColors /></main>;
+  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "guide" && <GuideModule journey={journey} navigate={setActive} />}{active === "records" && <RecordsModule navigate={setActive} />}<footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer><Toaster position="top-center" richColors /></main>;
 }

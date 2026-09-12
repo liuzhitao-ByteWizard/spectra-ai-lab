@@ -1,6 +1,6 @@
 export type ExperimentTask = "A" | "B";
 export type ExperimentStatus = "draft" | "completed" | "needs_review";
-export type ExperimentImageSlot = "primary" | "reference" | "unknown";
+export type ExperimentImageSlot = "primary" | "repeat_2" | "repeat_3" | "reference" | "unknown";
 
 export type ExperimentPayload = Record<string, unknown>;
 

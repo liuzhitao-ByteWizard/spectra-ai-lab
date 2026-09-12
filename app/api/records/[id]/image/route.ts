@@ -11,7 +11,7 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 function imageSlot(request: Request): ExperimentImageSlot | null {
   const slot = new URL(request.url).searchParams.get("slot");
-  return slot === "primary" || slot === "reference" || slot === "unknown" ? slot : null;
+  return slot === "primary" || slot === "repeat_2" || slot === "repeat_3" || slot === "reference" || slot === "unknown" ? slot : null;
 }
 
 export async function GET(request: Request, context: RouteContext) {
