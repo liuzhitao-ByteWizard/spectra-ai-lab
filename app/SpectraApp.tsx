@@ -630,6 +630,7 @@ function useExperimentSync({
   const runSyncRef = useRef<(task: ExperimentTask) => Promise<void>>(async () => undefined);
   const phaseRef = useRef<SyncPhase>("loading");
   const [phase, setPhase] = useState<SyncPhase>(authenticated ? "loading" : "idle");
+  const [savedSignature, setSavedSignature] = useState("");
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [loadRevision, setLoadRevision] = useState(0);
@@ -650,7 +651,9 @@ function useExperimentSync({
     suppressRef.current.add(record.task);
     await onRemoteRecordRef.current(record);
     setTimeout(() => {
-      lastSavedSignatureRef.current[record.task] = JSON.stringify(latestSnapshotRef.current[record.task] ?? snapshotFromRecord(record));
+      const adoptedSignature = JSON.stringify(latestSnapshotRef.current[record.task] ?? snapshotFromRecord(record));
+      lastSavedSignatureRef.current[record.task] = adoptedSignature;
+      setSavedSignature(adoptedSignature);
       suppressRef.current.delete(record.task);
     }, 250);
     setLastSyncedAt(Number(new Date(record.updatedAt)));
@@ -696,6 +699,7 @@ function useExperimentSync({
         if (pendingImagesRef.current[taskToSync][slot] === file) delete pendingImagesRef.current[taskToSync][slot];
       }
       lastSavedSignatureRef.current[taskToSync] = signature;
+      setSavedSignature(signature);
       setLastSyncedAt(Number(new Date(savedRecord.updatedAt)));
       setErrorMessage("");
       if (currentTaskRef.current === taskToSync) changePhase("synced");
@@ -725,6 +729,7 @@ function useExperimentSync({
     }
     metaRef.current[task] = null;
     lastSavedSignatureRef.current[task] = undefined;
+    setSavedSignature("");
     loadedRef.current[task] = true;
     changePhase("idle");
     setLoadRevision((value) => value + 1);
@@ -773,7 +778,8 @@ function useExperimentSync({
     changePhase("idle");
   }, [task, changePhase, pendingImagesRef]);
 
-  return { phase, lastSyncedAt, errorMessage, syncNow, resetSync };
+  const currentSnapshotSynced = phase === "synced" && savedSignature === JSON.stringify(snapshot);
+  return { phase, lastSyncedAt, errorMessage, currentSnapshotSynced, syncNow, resetSync };
 }
 
 function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, authenticated, finishExperiment }: { analyzeSignal?: number; journey: ExperimentJourney; navigate: (id: ModuleId) => void; updateJourney: (patch: Partial<ExperimentJourney>) => void; authenticated: boolean; finishExperiment: () => void }) {
@@ -957,7 +963,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
         {blockReason && aImage && <p className="inline-warning"><CircleAlert size={15} />{blockReason}</p>}
       </section>
     </div>
-    <section className="panel overview-panel"><div><h2>结果总览</h2><p>{!authenticated ? "匿名状态可完成本地分析；登录后自动保存实验过程。" : hasResult ? "关键参数、最终结果与残差会自动同步。" : "上传图片后即开始保存实验过程，完成计算后自动更新结果。"}</p><span className={`sync-state ${sync.phase}`} aria-live="polite">{sync.phase === "error" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{syncLabel}</span>{sync.phase === "error" && sync.errorMessage && <small className="sync-error">{sync.errorMessage}</small>}</div><div className="overview-metrics">{summary.map(([label, value]) => <span key={label}><small>{label}</small><strong>{value}</strong></span>)}</div>{hasResult && (!authenticated || sync.phase === "synced") ? <button className="primary-action" onClick={finishExperiment}><CheckCircle2 size={16} />完成本次实验</button> : <button className="secondary-action" onClick={() => void sync.syncNow()} disabled={!authenticated || !aImage || sync.phase === "saving" || sync.phase === "retrying"}><Save size={16} />{sync.phase === "error" ? "立即重试" : "立即同步"}</button>}</section>
+    <section className="panel overview-panel"><div><h2>结果总览</h2><p>{!authenticated ? "匿名状态可完成本地分析；登录后自动保存实验过程。" : hasResult ? "关键参数、最终结果与残差会自动同步。" : "上传图片后即开始保存实验过程，完成计算后自动更新结果。"}</p><span className={`sync-state ${sync.phase}`} aria-live="polite">{sync.phase === "error" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{syncLabel}</span>{sync.phase === "error" && sync.errorMessage && <small className="sync-error">{sync.errorMessage}</small>}</div><div className="overview-metrics">{summary.map(([label, value]) => <span key={label}><small>{label}</small><strong>{value}</strong></span>)}</div>{hasResult && (!authenticated || sync.currentSnapshotSynced) ? <button className="primary-action" onClick={finishExperiment}><CheckCircle2 size={16} />完成本次实验</button> : <button className="secondary-action" onClick={() => void sync.syncNow()} disabled={!authenticated || !aImage || sync.phase === "saving" || sync.phase === "retrying"}><Save size={16} />{sync.phase === "error" ? "立即重试" : "立即同步"}</button>}</section>
     <section className="panel review-note-panel"><div className="analysis-card-heading"><span><ClipboardCheck size={18} /></span><div><h2>异常诊断与复核意见</h2><p>记录异常现象、可能原因和复核结论；输入内容会随实验记录自动同步。</p></div></div><textarea value={diagnosis} maxLength={2000} onChange={(event) => setDiagnosis(event.target.value)} placeholder="例如：黄色双线未完全分离，已重新调整狭缝并复测。" /></section>
     <div className="analysis-results-grid">
       <section className="panel intensity-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>强度剖面与谱线标注</h2><p>曲线、候选峰和人工参考标记来自当前图像数据。</p></div></div><IntensityChart image={aImage} markers={aMarkers} title="光谱横向强度剖面" /></section>
@@ -1005,7 +1011,11 @@ function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: M
     try {
       const { records: latest } = await requestRecordJson<{ records: SavedRecord[] }>("/api/records?limit=100", undefined, 2);
       setRecords(latest);
-      setSelected((current) => current ? latest.find((record) => record.id === current.id) ?? latest[0] ?? null : latest[0] ?? null);
+      setSelected((current) => {
+        const newest = latest[0] ?? null;
+        if (!current || !newest || Number(new Date(newest.updatedAt)) > Number(new Date(current.updatedAt))) return newest;
+        return latest.find((record) => record.id === current.id) ?? newest;
+      });
       setLastUpdated(Date.now()); setErrorMessage("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "实验记录读取失败");
