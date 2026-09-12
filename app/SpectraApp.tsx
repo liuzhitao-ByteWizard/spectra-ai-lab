@@ -634,6 +634,7 @@ function useExperimentSync({
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [loadRevision, setLoadRevision] = useState(0);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     currentTaskRef.current = task;
@@ -727,13 +728,35 @@ function useExperimentSync({
       changePhase(metaRef.current[task] ? "synced" : "idle");
       return;
     }
-    metaRef.current[task] = null;
-    lastSavedSignatureRef.current[task] = undefined;
-    setSavedSignature("");
-    loadedRef.current[task] = true;
-    changePhase("idle");
-    setLoadRevision((value) => value + 1);
-  }, [task, authenticated, changePhase]);
+    let cancelled = false;
+    changePhase("loading");
+    const restorePendingRecord = async () => {
+      try {
+        const { records } = await requestRecordJson<{ records: SavedRecord[] }>(`/api/records?task=${task}&limit=100`, undefined, 3, () => changePhase("retrying"));
+        if (cancelled) return;
+        const pendingRecord = records.find((record) => record.status !== "completed");
+        metaRef.current[task] = null;
+        lastSavedSignatureRef.current[task] = undefined;
+        setSavedSignature("");
+        if (pendingRecord) {
+          await adoptRecord(pendingRecord);
+          if (!cancelled) toast.success("已恢复上次未完成实验");
+        } else {
+          changePhase("idle");
+        }
+        if (!cancelled) {
+          loadedRef.current[task] = true;
+          setLoadRevision((value) => value + 1);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setErrorMessage(error instanceof Error ? error.message : "未完成实验读取失败");
+        changePhase("error");
+      }
+    };
+    void restorePendingRecord();
+    return () => { cancelled = true; };
+  }, [task, authenticated, changePhase, adoptRecord, loadAttempt]);
 
   useEffect(() => {
     if (!authenticated || !enabled || !loadedRef.current[task] || suppressRef.current.has(task)) return;
@@ -769,6 +792,12 @@ function useExperimentSync({
     return runSyncRef.current(task);
   }, [task]);
 
+  const retryLoad = useCallback(() => {
+    loadedRef.current[task] = false;
+    setErrorMessage("");
+    setLoadAttempt((value) => value + 1);
+  }, [task]);
+
   const resetSync = useCallback(() => {
     if (timersRef.current[task]) clearTimeout(timersRef.current[task]);
     metaRef.current[task] = null;
@@ -779,7 +808,7 @@ function useExperimentSync({
   }, [task, changePhase, pendingImagesRef]);
 
   const currentSnapshotSynced = phase === "synced" && savedSignature === JSON.stringify(snapshot);
-  return { phase, lastSyncedAt, errorMessage, currentSnapshotSynced, syncNow, resetSync };
+  return { phase, lastSyncedAt, errorMessage, currentSnapshotSynced, retryLoad, syncNow, resetSync };
 }
 
 function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, authenticated, finishExperiment }: { analyzeSignal?: number; journey: ExperimentJourney; navigate: (id: ModuleId) => void; updateJourney: (patch: Partial<ExperimentJourney>) => void; authenticated: boolean; finishExperiment: () => void }) {
@@ -963,7 +992,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
         {blockReason && aImage && <p className="inline-warning"><CircleAlert size={15} />{blockReason}</p>}
       </section>
     </div>
-    <section className="panel overview-panel"><div><h2>结果总览</h2><p>{!authenticated ? "匿名状态可完成本地分析；登录后自动保存实验过程。" : hasResult ? "关键参数、最终结果与残差会自动同步。" : "上传图片后即开始保存实验过程，完成计算后自动更新结果。"}</p><span className={`sync-state ${sync.phase}`} aria-live="polite">{sync.phase === "error" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{syncLabel}</span>{sync.phase === "error" && sync.errorMessage && <small className="sync-error">{sync.errorMessage}</small>}</div><div className="overview-metrics">{summary.map(([label, value]) => <span key={label}><small>{label}</small><strong>{value}</strong></span>)}</div>{hasResult && (!authenticated || sync.currentSnapshotSynced) ? <button className="primary-action" onClick={finishExperiment}><CheckCircle2 size={16} />完成本次实验</button> : <button className="secondary-action" onClick={() => void sync.syncNow()} disabled={!authenticated || !aImage || sync.phase === "saving" || sync.phase === "retrying"}><Save size={16} />{sync.phase === "error" ? "立即重试" : "立即同步"}</button>}</section>
+    <section className="panel overview-panel"><div><h2>结果总览</h2><p>{!authenticated ? "匿名状态可完成本地分析；登录后自动保存实验过程。" : hasResult ? "关键参数、最终结果与残差会自动同步。" : "上传图片后即开始保存实验过程，完成计算后自动更新结果。"}</p><span className={`sync-state ${sync.phase}`} aria-live="polite">{sync.phase === "error" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{syncLabel}</span>{sync.phase === "error" && sync.errorMessage && <small className="sync-error">{sync.errorMessage}</small>}</div><div className="overview-metrics">{summary.map(([label, value]) => <span key={label}><small>{label}</small><strong>{value}</strong></span>)}</div>{hasResult && (!authenticated || sync.currentSnapshotSynced) ? <button className="primary-action" onClick={finishExperiment}><CheckCircle2 size={16} />完成本次实验</button> : <button className="secondary-action" onClick={() => sync.phase === "error" && !aImage ? sync.retryLoad() : void sync.syncNow()} disabled={!authenticated || sync.phase === "saving" || sync.phase === "retrying" || (!aImage && sync.phase !== "error")}><Save size={16} />{sync.phase === "error" && !aImage ? "重新读取" : sync.phase === "error" ? "立即重试" : "立即同步"}</button>}</section>
     <section className="panel review-note-panel"><div className="analysis-card-heading"><span><ClipboardCheck size={18} /></span><div><h2>异常诊断与复核意见</h2><p>记录异常现象、可能原因和复核结论；输入内容会随实验记录自动同步。</p></div></div><textarea value={diagnosis} maxLength={2000} onChange={(event) => setDiagnosis(event.target.value)} placeholder="例如：黄色双线未完全分离，已重新调整狭缝并复测。" /></section>
     <div className="analysis-results-grid">
       <section className="panel intensity-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>强度剖面与谱线标注</h2><p>曲线、候选峰和人工参考标记来自当前图像数据。</p></div></div><IntensityChart image={aImage} markers={aMarkers} title="光谱横向强度剖面" /></section>
@@ -1036,7 +1065,7 @@ function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: M
   return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="回看每次实验，复核过程与结果。" description="查看实验步骤、原始光谱、测量结果与异常诊断；支持导出 CSV 和实验报告。" action={<button className="secondary-action" onClick={exportCsv} disabled={!records.length}><Download size={16} />导出全部 CSV</button>} />
     <div className={`records-sync ${errorMessage ? "error" : ""}`} aria-live="polite">{errorMessage ? <><CircleAlert size={15} /><span>{errorMessage}</span><button onClick={() => void refresh()}>重新加载</button></> : <><CheckCircle2 size={15} /><span>{lastUpdated ? `云端记录已更新 · ${new Date(lastUpdated).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "正在连接云端记录"}</span></>}</div>
     <div className="records-grid"><section className="panel record-list"><div className="panel-title"><div><span className="step-index"><History size={14} /></span><h2>我的实验</h2></div><span>{records.length} 条</span></div>{loading ? <div className="record-empty">正在读取实验记录…</div> : records.length ? records.map((record) => <button key={record.id} className={selected?.id === record.id ? "active" : ""} onClick={() => setSelected(record)}><span className="record-source"><Waves size={18} /></span><div><strong>{record.resultLabel}<small>{record.resultValue}</small></strong><p><Clock3 size={12} />{new Date(record.updatedAt).toLocaleString("zh-CN")} · {record.source}</p></div><em className={record.status === "completed" ? "good" : ""}>{record.status === "draft" ? "进行中" : record.status === "needs_review" ? "需复核" : "已完成"}</em></button>) : <div className="record-empty"><History size={30} /><strong>还没有实验记录</strong><p>上传光谱图片后，实验过程会自动同步并出现在这里。</p></div>}</section>
-      <section className="panel replay-panel">{selected ? <><div className="replay-head"><div><p className="eyebrow">实验回放 · 版本 {selected.version}</p><h2>{selected.resultLabel} · {selected.resultValue}</h2><small>最后同步于 {new Date(selected.updatedAt).toLocaleString("zh-CN")}</small></div><a className="secondary-action" href={`/api/records/${encodeURIComponent(selected.id)}/report`} target="_blank" rel="noreferrer"><FileText size={16} />查看 / 打印报告</a></div><div className="record-evidence"><span><small>已完成阶段</small><strong>{selected.steps.length} 项</strong></span><span><small>匹配汞线</small><strong>{markerCount} 条</strong></span><span><small>记录状态</small><strong>{selected.quality}</strong></span></div>{imageEntries.length > 0 && <div className="record-images">{imageEntries.map(([slot, url]) => <figure key={slot}><Image src={url} alt="汞灯零级与单侧一级原始照片" width={800} height={450} unoptimized /><figcaption>{slot === "primary" ? "主测照片" : slot === "repeat_2" ? "重复照片 2" : "重复照片 3"}</figcaption></figure>)}</div>}<div className="timeline">{selected.steps.length ? selected.steps.map((step, index) => <div className="timeline-item" key={step}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step}</strong><p>{step === "d 反演及不确定度评估" ? `${selected.resultLabel} = ${selected.resultValue}` : "该阶段的参数和证据已保存到云端记录。"}</p></div>{index < selected.steps.length - 1 && <i />}</div>) : <div className="record-empty compact"><History size={28} /><strong>实验尚未开始</strong></div>}</div><div className="record-diagnosis"><strong>异常诊断与复核意见</strong><p>{selected.diagnosis || "未填写异常诊断或复核意见。"}</p></div></> : <div className="record-empty"><Microscope size={34} /><strong>选择一条记录开始回放</strong></div>}</section></div>
+      <section className="panel replay-panel">{selected ? <><div className="replay-head"><div><p className="eyebrow">实验回放</p><h2>{selected.resultLabel} · {selected.resultValue}</h2><small>最后同步于 {new Date(selected.updatedAt).toLocaleString("zh-CN")}</small></div><a className="secondary-action" href={`/api/records/${encodeURIComponent(selected.id)}/report`} target="_blank" rel="noreferrer"><FileText size={16} />查看 / 打印报告</a></div><div className="record-evidence"><span><small>已完成阶段</small><strong>{selected.steps.length} 项</strong></span><span><small>匹配汞线</small><strong>{markerCount} 条</strong></span><span><small>记录状态</small><strong>{selected.quality}</strong></span></div>{imageEntries.length > 0 && <div className="record-images">{imageEntries.map(([slot, url]) => <figure key={slot}><Image src={url} alt="汞灯零级与单侧一级原始照片" width={800} height={450} unoptimized /><figcaption>{slot === "primary" ? "主测照片" : slot === "repeat_2" ? "重复照片 2" : "重复照片 3"}</figcaption></figure>)}</div>}<div className="timeline">{selected.steps.length ? selected.steps.map((step, index) => <div className="timeline-item" key={step}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step}</strong><p>{step === "d 反演及不确定度评估" ? `${selected.resultLabel} = ${selected.resultValue}` : "该阶段的参数和证据已保存到云端记录。"}</p></div>{index < selected.steps.length - 1 && <i />}</div>) : <div className="record-empty compact"><History size={28} /><strong>实验尚未开始</strong></div>}</div><div className="record-diagnosis"><strong>异常诊断与复核意见</strong><p>{selected.diagnosis || "未填写异常诊断或复核意见。"}</p></div></> : <div className="record-empty"><Microscope size={34} /><strong>选择一条记录开始回放</strong></div>}</section></div>
   </div>;
 }
 
