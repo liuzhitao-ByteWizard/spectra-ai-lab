@@ -201,11 +201,11 @@ h1 { margin: 0; max-width: 760px; font-size: clamp(25px, 3vw, 38px); line-height
 .virtual-lab-shell { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(340px, .72fr); gap: 18px; align-items: start; }
 .lab-scene-column, .virtual-lab-side { min-width: 0; }
 .lab-scene-column { overflow: hidden; border: 1px solid #183b5c; border-radius: 22px; background: #061424; box-shadow: 0 18px 42px #122d4f20; }
-.webgl-stage { min-height: min(62vh, 650px); position: relative; overflow: hidden; background: radial-gradient(circle at 48% 45%, #173d61 0, #0a2037 47%, #040e19 100%); touch-action: none; }
+.webgl-stage { min-height: min(62vh, 650px); position: relative; overflow: hidden; background: #08090e; touch-action: none; }
 .webgl-stage.mouse-telescope, .webgl-stage.mouse-stage { cursor: ew-resize; }
 .three-host { position: absolute; z-index: 1; inset: 0; }
 .three-host canvas { display: block; width: 100%; height: 100%; }
-.scene-grid { position: absolute; z-index: 2; inset: 0; pointer-events: none; opacity: .38; background-image: linear-gradient(#75a5d40b 1px, transparent 1px), linear-gradient(90deg, #75a5d40b 1px, transparent 1px); background-size: 36px 36px; mask-image: linear-gradient(to bottom, #0008, transparent 75%); }
+.scene-grid { display: none; }
 .scene-badges { position: absolute; z-index: 3; top: 15px; left: 15px; display: flex; flex-wrap: wrap; gap: 7px; max-width: calc(100% - 30px); pointer-events: none; }
 .scene-badges span { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; color: #b7cadf; border: 1px solid #51749380; border-radius: 8px; background: #061323bd; backdrop-filter: blur(8px); font-size: 12px; }
 .scene-badges i, .quick-actions i { width: 7px; height: 7px; border-radius: 50%; background: #5e748c; }
@@ -215,9 +215,9 @@ h1 { margin: 0; max-width: 760px; font-size: clamp(25px, 3vw, 38px); line-height
 .scene-view-buttons button, .scene-tool-buttons button { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 8px; color: #9fb7ce; border: 0; border-radius: 7px; background: transparent; font-size: 12px; }
 .scene-view-buttons button { width: 34px; padding: 0; }
 .scene-view-buttons button:hover, .scene-tool-buttons button:hover, .scene-view-buttons button.active, .scene-tool-buttons button.active { color: #fff; background: #1c64a7; }
-.scene-part-labels { position: absolute; z-index: 3; inset: 0; pointer-events: none; color: #d8ecff; font-size: 12px; text-shadow: 0 1px 5px #01070f; }
-.scene-part-labels span { position: absolute; padding: 5px 7px; border: 1px solid #6d9dc16b; border-radius: 6px; background: #07172bc7; }
-.label-collimator { left: 16%; top: 51%; }.label-stage { left: 47%; top: 43%; }.label-telescope { right: 15%; top: 33%; }
+.scene-part-labels { position: absolute; z-index: 3; inset: 0; pointer-events: none; color: #969ba4; font-size: 12px; text-shadow: 0 1px 2px #000; }
+.scene-part-labels span { position: absolute; padding: 2px 4px; border: 0; border-radius: 3px; background: #08090e88; }
+.label-lamp { left: 12%; top: 11%; }.label-collimator { left: 33%; top: 18%; }.label-stage { left: 50%; top: 16%; }.label-telescope { right: 16%; top: 18%; }
 .instrument-control-deck { border-top: 1px solid #294a68; background: #091b2e; }
 .deck-section { padding: 17px 18px 18px; }
 .deck-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: #d9e9f8; font-size: 14px; font-weight: 700; }

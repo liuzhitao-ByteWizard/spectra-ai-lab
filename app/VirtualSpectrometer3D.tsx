@@ -45,7 +45,7 @@ type SceneRuntime = {
   stageGroup: THREE.Group;
   telescopeGroup: THREE.Group;
   beams: THREE.Group;
-  lamp: THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>;
+  lamp: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   animationFrame: number;
 };
 
@@ -136,7 +136,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   const dragRef = useRef<{ active: boolean; x: number }>({ active: false, x: 0 });
   const [mode, setMode] = useState<LabMode>("guided");
   const [mouseTool, setMouseTool] = useState<MouseTool>("view");
-  const [cameraView, setCameraView] = useState<CameraView>("orbit");
+  const [cameraView, setCameraView] = useState<CameraView>("side");
   const [lampOn, setLampOn] = useState(true);
   const [linesPerMm, setLinesPerMm] = useState(300);
   const [slitWidth, setSlitWidth] = useState(.36);
@@ -221,146 +221,219 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const host = hostRef.current;
     if (!host) return;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.08;
+    renderer.setClearColor("#08090e", 1);
     host.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog("#05101e", 8, 20);
-    const camera = new THREE.PerspectiveCamera(38, 1, .1, 100);
-    camera.position.set(5.8, 4.2, 6.1);
+    scene.fog = new THREE.Fog("#08090e", 13, 25);
+    const camera = new THREE.PerspectiveCamera(27, 1, .1, 100);
+    camera.position.set(0, 2.75, 13.4);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = .08;
-    controls.minDistance = 3.8;
-    controls.maxDistance = 10;
+    controls.dampingFactor = .075;
+    controls.enablePan = false;
+    controls.minDistance = 7.4;
+    controls.maxDistance = 16;
     controls.maxPolarAngle = Math.PI * .48;
-    controls.target.set(0, .6, 0);
+    controls.target.set(0, .45, 0);
 
-    scene.add(new THREE.HemisphereLight("#bde0ff", "#0c1b2b", 2.1));
-    const keyLight = new THREE.DirectionalLight("#b3dcff", 3.1);
-    keyLight.position.set(3.8, 6.2, 3.3);
+    scene.add(new THREE.HemisphereLight("#d3d6dc", "#111319", 1.7));
+    const keyLight = new THREE.DirectionalLight("#f7f8fb", 3.5);
+    keyLight.position.set(-4, 7, 6);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(1024, 1024);
+    keyLight.shadow.camera.left = -7;
+    keyLight.shadow.camera.right = 7;
+    keyLight.shadow.camera.top = 7;
+    keyLight.shadow.camera.bottom = -7;
     scene.add(keyLight);
-    const rimLight = new THREE.PointLight("#3c90ff", 14, 10, 2);
-    rimLight.position.set(-2.8, 2.8, -2.6);
-    scene.add(rimLight);
+    const fillLight = new THREE.DirectionalLight("#8d9ba9", 1.45);
+    fillLight.position.set(5, 3, -4);
+    scene.add(fillLight);
 
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(5.8, 96),
-      new THREE.MeshStandardMaterial({ color: "#061526", roughness: .9, metalness: .05 }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    const material = (color: string, metalness = .55, roughness = .35) => new THREE.MeshStandardMaterial({ color, metalness, roughness });
+    const matteBlack = material("#15161a", .34, .54);
+    const sootBlack = material("#090a0c", .2, .68);
+    const carbon = material("#202226", .64, .31);
+    const darkGray = material("#3b3d42", .72, .3);
+    const baseGray = material("#74777c", .68, .34);
+    const aluminum = material("#b6b9bd", .84, .2);
+    const brightMetal = material("#d1d3d6", .9, .16);
+    const railMetal = material("#9da0a4", .72, .31);
+    const groundMaterial = material("#e5e6e9", .1, .77);
+    const groundEdgeMaterial = material("#9ca0a8", .3, .56);
+    const gratingMaterial = new THREE.MeshStandardMaterial({ color: "#272a30", metalness: .72, roughness: .2, emissive: "#08090e" });
+    const rulerMaterial = material("#b4b6ba", .84, .18);
+    const lampMaterial = new THREE.MeshStandardMaterial({ color: "#37df69", emissive: "#17d94e", emissiveIntensity: 2.8, metalness: .08, roughness: .3 });
+
+    const addBox = (parent: THREE.Object3D, size: [number, number, number], position: [number, number, number], meshMaterial: THREE.Material) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), meshMaterial);
+      mesh.position.set(...position);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      return mesh;
+    };
+    const addHorizontalTube = (
+      parent: THREE.Object3D,
+      startRadius: number,
+      endRadius: number,
+      length: number,
+      position: [number, number, number],
+      meshMaterial: THREE.Material,
+      segments = 32,
+    ) => {
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(startRadius, endRadius, length, segments), meshMaterial);
+      mesh.rotation.z = Math.PI / 2;
+      mesh.position.set(...position);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      return mesh;
+    };
+    const addVerticalTube = (
+      parent: THREE.Object3D,
+      topRadius: number,
+      bottomRadius: number,
+      height: number,
+      position: [number, number, number],
+      meshMaterial: THREE.Material,
+      segments = 32,
+    ) => {
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(topRadius, bottomRadius, height, segments), meshMaterial);
+      mesh.position.set(...position);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      return mesh;
+    };
+    const addRing = (parent: THREE.Object3D, position: [number, number, number], radius: number, thickness: number, meshMaterial: THREE.Material) => {
+      const mesh = new THREE.Mesh(new THREE.TorusGeometry(radius, thickness, 10, 36), meshMaterial);
+      mesh.rotation.y = Math.PI / 2;
+      mesh.position.set(...position);
+      mesh.castShadow = true;
+      parent.add(mesh);
+      return mesh;
+    };
+    const addKnurledSleeve = (
+      parent: THREE.Object3D,
+      radius: number,
+      length: number,
+      position: [number, number, number],
+      meshMaterial: THREE.Material,
+    ) => {
+      addHorizontalTube(parent, radius, radius, length, position, meshMaterial);
+      for (let index = -4; index <= 4; index++) addRing(parent, [position[0] + index * length / 10, position[1], position[2]], radius + .01, .013, sootBlack);
+    };
+
+    const whiteBase = addBox(scene, [12.4, .14, 5.8], [0, -.98, 0], groundMaterial);
+    whiteBase.receiveShadow = true;
+    addBox(scene, [12.55, .055, 5.95], [0, -1.075, 0], groundEdgeMaterial);
 
     const instrument = new THREE.Group();
     scene.add(instrument);
-    const brass = new THREE.MeshStandardMaterial({ color: "#6d8fac", metalness: .78, roughness: .24 });
-    const darkMetal = new THREE.MeshStandardMaterial({ color: "#172a3c", metalness: .86, roughness: .2 });
-    const trim = new THREE.MeshStandardMaterial({ color: "#b6d0e2", metalness: .78, roughness: .2 });
-    const black = new THREE.MeshStandardMaterial({ color: "#071421", metalness: .35, roughness: .42 });
-    const gratingMaterial = new THREE.MeshStandardMaterial({ color: "#87b6d9", metalness: .7, roughness: .22, emissive: "#122238" });
 
-    const legMaterial = new THREE.MeshStandardMaterial({ color: "#24384c", metalness: .68, roughness: .27 });
-    for (let index = 0; index < 3; index++) {
-      const angle = index * Math.PI * 2 / 3 + .2;
-      const x = Math.cos(angle) * 1.2;
-      const z = Math.sin(angle) * 1.2;
-      addCylinderBetween(instrument, new THREE.Vector3(x * .55, .03, z * .55), new THREE.Vector3(x, -.62, z), .105, legMaterial);
-      const foot = new THREE.Mesh(new THREE.CylinderGeometry(.19, .23, .12, 18), legMaterial);
-      foot.position.set(x, -.66, z);
-      foot.castShadow = true;
-      foot.receiveShadow = true;
-      instrument.add(foot);
+    const carriage = new THREE.Mesh(new THREE.CapsuleGeometry(.38, 2.58, 8, 24), baseGray);
+    carriage.rotation.z = Math.PI / 2;
+    carriage.position.set(-.05, -.43, .12);
+    carriage.castShadow = true;
+    carriage.receiveShadow = true;
+    instrument.add(carriage);
+    addBox(instrument, [2.35, .22, .64], [-.13, -.42, -.16], darkGray);
+    addHorizontalTube(instrument, .34, .34, 1.96, [-.22, -.28, -.23], carbon);
+    addVerticalTube(instrument, .5, .56, .16, [0, -.05, .03], darkGray, 40);
+    addVerticalTube(instrument, .31, .38, .72, [0, .34, .03], baseGray, 36);
+    addVerticalTube(instrument, .58, .61, .13, [0, .76, .03], darkGray, 48);
+    addVerticalTube(instrument, .5, .5, .06, [0, .855, .03], aluminum, 48);
+    for (const [x, z] of [[-1.35, -.2], [.95, -.22], [.1, .54]] as Array<[number, number]>) {
+      addVerticalTube(instrument, .08, .095, .28, [x, -.76, z], carbon, 18);
+      addVerticalTube(instrument, .14, .14, .075, [x, -.93, z], matteBlack, 20);
     }
 
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(1.73, 1.9, .26, 72), darkMetal);
-    base.position.y = -.05;
-    base.castShadow = true;
-    base.receiveShadow = true;
-    instrument.add(base);
-    const dial = new THREE.Mesh(new THREE.CylinderGeometry(1.58, 1.58, .095, 72), brass);
-    dial.position.y = .14;
-    dial.castShadow = true;
-    instrument.add(dial);
-    const dialInset = new THREE.Mesh(new THREE.CylinderGeometry(1.32, 1.32, .108, 72), black);
-    dialInset.position.y = .21;
-    instrument.add(dialInset);
-    drawDialTicks(instrument);
-
-    const centerColumn = new THREE.Mesh(new THREE.CylinderGeometry(.47, .55, .44, 36), darkMetal);
-    centerColumn.position.y = .43;
-    centerColumn.castShadow = true;
-    instrument.add(centerColumn);
+    const bench = new THREE.Group();
+    instrument.add(bench);
+    addBox(bench, [6.2, .16, .32], [.05, 1.13, .32], railMetal);
+    addBox(bench, [4.9, .09, .42], [.1, 1.01, .28], baseGray);
+    addBox(bench, [.26, .84, .3], [-2.15, .67, .32], baseGray);
+    addBox(bench, [.26, .78, .3], [2.07, .69, .32], baseGray);
+    addBox(bench, [1.25, .19, .5], [-1.65, .66, .32], baseGray);
+    addBox(bench, [1.06, .19, .5], [1.55, .68, .32], baseGray);
 
     const stageGroup = new THREE.Group();
-    stageGroup.position.y = .67;
     instrument.add(stageGroup);
-    const stage = new THREE.Mesh(new THREE.CylinderGeometry(.67, .73, .15, 40), brass);
-    stage.castShadow = true;
-    stageGroup.add(stage);
-    const gratingFrame = new THREE.Mesh(new THREE.BoxGeometry(.13, .86, .98), darkMetal);
-    gratingFrame.position.set(0, .42, 0);
-    stageGroup.add(gratingFrame);
-    const grating = new THREE.Mesh(new THREE.PlaneGeometry(.7, .72), gratingMaterial);
-    grating.position.set(.072, .42, 0);
+    addVerticalTube(stageGroup, .46, .5, .13, [0, .93, .03], aluminum, 40);
+    addVerticalTube(stageGroup, .41, .44, .09, [0, 1.025, .03], sootBlack, 36);
+    const gratingFrame = addBox(stageGroup, [.11, .74, .7], [0, 1.38, .03], gratingMaterial);
+    gratingFrame.castShadow = true;
+    const grating = new THREE.Mesh(new THREE.PlaneGeometry(.51, .56), new THREE.MeshStandardMaterial({ color: "#aab1b6", metalness: .86, roughness: .13 }));
+    grating.position.set(.061, 1.38, .03);
     grating.rotation.y = Math.PI / 2;
     stageGroup.add(grating);
-    for (let index = -7; index <= 7; index++) {
-      const ruling = new THREE.Mesh(new THREE.BoxGeometry(.007, .68, .006), trim);
-      ruling.position.set(.08, .42, index * .042);
-      stageGroup.add(ruling);
+    for (let index = -8; index <= 8; index++) {
+      const ruling = addBox(stageGroup, [.014, .51, .008], [.071, 1.38, .03 + index * .0315], rulerMaterial);
+      ruling.castShadow = false;
     }
+    addBox(stageGroup, [.65, .11, .13], [0, 1.04, .03], aluminum);
+    addVerticalTube(stageGroup, .075, .075, .58, [-.22, 1.34, .03], carbon, 18);
+    addRing(stageGroup, [-.22, 1.52, .03], .095, .022, brightMetal);
+
+    const lampHousing = new THREE.Group();
+    instrument.add(lampHousing);
+    addBox(lampHousing, [1.05, .34, .88], [-4.18, -.68, .05], matteBlack);
+    addBox(lampHousing, [.78, 2.0, .64], [-4.18, .27, .05], sootBlack);
+    addBox(lampHousing, [.88, .1, .72], [-4.18, 1.32, .05], carbon);
+    addBox(lampHousing, [.72, .09, .58], [-4.18, 1.55, .05], sootBlack);
+    addBox(lampHousing, [.06, .74, .18], [-3.78, 1.2, .05], lampMaterial);
+    addBox(lampHousing, [.13, .96, .31], [-3.69, 1.2, .05], matteBlack);
+    const lamp = new THREE.Mesh(new THREE.BoxGeometry(.022, .72, .13), lampMaterial);
+    lamp.position.set(-3.616, 1.2, .05);
+    lampHousing.add(lamp);
+    const lampHalo = new THREE.PointLight("#39ef68", 2.7, 2.4, 2);
+    lampHalo.position.set(-3.56, 1.2, .05);
+    lampHousing.add(lampHalo);
 
     const collimator = new THREE.Group();
-    collimator.position.set(-1.5, 1.15, 0);
     instrument.add(collimator);
-    const collimatorTube = new THREE.Mesh(new THREE.CylinderGeometry(.22, .27, 2.42, 30), darkMetal);
-    collimatorTube.rotation.z = Math.PI / 2;
-    collimatorTube.position.x = -1.1;
-    collimatorTube.castShadow = true;
-    collimator.add(collimatorTube);
-    const collimatorRing = new THREE.Mesh(new THREE.TorusGeometry(.275, .042, 12, 32), trim);
-    collimatorRing.position.x = -.05;
-    collimatorRing.rotation.y = Math.PI / 2;
-    collimator.add(collimatorRing);
-    const lamp = new THREE.Mesh(new THREE.SphereGeometry(.18, 24, 24), new THREE.MeshStandardMaterial({ color: "#c7efff", emissive: "#55b8ff", emissiveIntensity: 2.2, roughness: .2 }));
-    lamp.position.x = -2.28;
-    lamp.castShadow = true;
-    collimator.add(lamp);
-    const lampHalo = new THREE.PointLight("#55b8ff", 5.5, 3.2, 2);
-    lampHalo.position.x = -2.28;
-    collimator.add(lampHalo);
+    const opticalAxisY = 1.47;
+    addHorizontalTube(collimator, .33, .33, .42, [-3.32, opticalAxisY, .03], sootBlack);
+    addRing(collimator, [-3.07, opticalAxisY, .03], .36, .035, carbon);
+    addHorizontalTube(collimator, .29, .29, .48, [-2.86, opticalAxisY, .03], carbon);
+    addHorizontalTube(collimator, .22, .22, .62, [-2.33, opticalAxisY, .03], brightMetal);
+    addRing(collimator, [-2.58, opticalAxisY, .03], .25, .028, aluminum);
+    addKnurledSleeve(collimator, .31, .3, [-1.91, opticalAxisY, .03], sootBlack);
+    addHorizontalTube(collimator, .28, .28, .58, [-1.52, opticalAxisY, .03], aluminum);
+    addRing(collimator, [-1.22, opticalAxisY, .03], .31, .03, brightMetal);
+    addKnurledSleeve(collimator, .29, .26, [-1.02, opticalAxisY, .03], carbon);
+    addHorizontalTube(collimator, .25, .22, .74, [-.58, opticalAxisY, .03], aluminum);
+    addRing(collimator, [-.22, opticalAxisY, .03], .25, .025, darkGray);
+    addBox(collimator, [.3, .76, .35], [-2.48, .83, .03], darkGray);
+    addBox(collimator, [.62, .12, .46], [-2.48, .48, .03], baseGray);
 
     const telescopeGroup = new THREE.Group();
-    telescopeGroup.position.set(.05, 1.15, 0);
     instrument.add(telescopeGroup);
-    const telescopeTube = new THREE.Mesh(new THREE.CylinderGeometry(.24, .3, 2.86, 34), darkMetal);
-    telescopeTube.rotation.z = Math.PI / 2;
-    telescopeTube.position.x = 1.38;
-    telescopeTube.castShadow = true;
-    telescopeGroup.add(telescopeTube);
-    const telescopeRail = new THREE.Mesh(new THREE.CylinderGeometry(.11, .13, 2.42, 24), brass);
-    telescopeRail.rotation.z = Math.PI / 2;
-    telescopeRail.position.set(1.25, -.25, 0);
-    telescopeGroup.add(telescopeRail);
-    const objective = new THREE.Mesh(new THREE.CylinderGeometry(.34, .34, .16, 32), trim);
-    objective.rotation.z = Math.PI / 2;
-    objective.position.x = 2.75;
-    telescopeGroup.add(objective);
-    const eyepiece = new THREE.Mesh(new THREE.CylinderGeometry(.21, .18, .28, 24), black);
-    eyepiece.rotation.z = Math.PI / 2;
-    eyepiece.position.x = -.02;
-    telescopeGroup.add(eyepiece);
-    const focusKnob = new THREE.Mesh(new THREE.TorusGeometry(.12, .04, 12, 22), trim);
-    focusKnob.position.set(1.55, .28, 0);
-    focusKnob.rotation.y = Math.PI / 2;
-    telescopeGroup.add(focusKnob);
+    addBox(telescopeGroup, [3.55, .09, .17], [2.02, 1.17, .03], carbon);
+    addBox(telescopeGroup, [.29, .72, .34], [1.15, .91, .03], baseGray);
+    addBox(telescopeGroup, [1.08, .13, .48], [1.15, .6, .03], baseGray);
+    addHorizontalTube(telescopeGroup, .32, .3, .58, [.56, opticalAxisY, .03], sootBlack);
+    addRing(telescopeGroup, [.85, opticalAxisY, .03], .35, .035, darkGray);
+    addHorizontalTube(telescopeGroup, .26, .24, .66, [1.18, opticalAxisY, .03], carbon);
+    addKnurledSleeve(telescopeGroup, .32, .26, [1.55, opticalAxisY, .03], sootBlack);
+    addHorizontalTube(telescopeGroup, .22, .22, 1.62, [2.5, opticalAxisY, .03], aluminum);
+    addHorizontalTube(telescopeGroup, .12, .12, 1.55, [2.63, opticalAxisY + .2, .03], brightMetal, 24);
+    addRing(telescopeGroup, [1.82, opticalAxisY, .03], .25, .025, brightMetal);
+    addRing(telescopeGroup, [3.18, opticalAxisY, .03], .25, .026, railMetal);
+    addHorizontalTube(telescopeGroup, .23, .3, .42, [3.53, opticalAxisY, .03], carbon);
+    addKnurledSleeve(telescopeGroup, .34, .32, [3.88, opticalAxisY, .03], sootBlack);
+    addHorizontalTube(telescopeGroup, .24, .38, .2, [4.13, opticalAxisY, .03], matteBlack);
+    addVerticalTube(telescopeGroup, .095, .12, .64, [3.76, 1.12, .03], sootBlack, 18);
+    addRing(telescopeGroup, [3.76, 1.4, .03], .115, .02, carbon);
 
     const beams = new THREE.Group();
     instrument.add(beams);
@@ -408,17 +481,17 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     }
     if (!lampOn || !showRays) return;
     const incidentMaterial = new THREE.MeshBasicMaterial({ color: "#c8e9ff", transparent: true, opacity: .28 });
-    addCylinderBetween(runtime.beams, new THREE.Vector3(-2.5, 1.15, 0), new THREE.Vector3(-.05, 1.15, 0), .025, incidentMaterial);
+    addCylinderBetween(runtime.beams, new THREE.Vector3(-3.56, 1.47, .03), new THREE.Vector3(-.06, 1.47, .03), .018, incidentMaterial);
     const zeroMaterial = new THREE.MeshBasicMaterial({ color: "#eff8ff", transparent: true, opacity: .22 });
-    addCylinderBetween(runtime.beams, new THREE.Vector3(.05, 1.15, 0), new THREE.Vector3(3.2, 1.15, 0), .018, zeroMaterial);
+    addCylinderBetween(runtime.beams, new THREE.Vector3(.06, 1.47, .03), new THREE.Vector3(4.18, 1.47, .03), .013, zeroMaterial);
     const intensityFactor = clamp(.45 + focus * .4 + (slitWidth <= .56 ? .15 : 0) + Math.log2(Math.max(slitCount, 2)) * .02, .28, 1);
     displayedLines.forEach((line) => {
       const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle);
       if (angle === null) return;
       const rad = toRadians(angle);
-      const end = new THREE.Vector3(Math.cos(rad) * 3.25, 1.15, Math.sin(rad) * 3.25);
+      const end = new THREE.Vector3(Math.cos(rad) * 4.18, 1.47, Math.sin(rad) * 4.18 + .03);
       const material = new THREE.MeshBasicMaterial({ color: line.color, transparent: true, opacity: line.intensity * intensityFactor * (line.weak ? .48 : 1) });
-      addCylinderBetween(runtime.beams, new THREE.Vector3(.05, 1.15, 0), end, .015 + singleRatio * .012, material);
+      addCylinderBetween(runtime.beams, new THREE.Vector3(.06, 1.47, .03), end, .011 + singleRatio * .01, material);
     });
   }, [stageAngle, telescopeAngle, lampOn, showRays, displayedLines, linesPerMm, focus, slitWidth, slitCount, singleRatio]);
 
@@ -426,10 +499,10 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const runtime = runtimeRef.current;
     setCameraView(view);
     if (!runtime) return;
-    runtime.controls.target.set(0, .55, 0);
-    if (view === "top") runtime.camera.position.set(.05, 8.5, .08);
-    else if (view === "side") runtime.camera.position.set(0, 2.4, 8.2);
-    else runtime.camera.position.set(5.8, 4.2, 6.1);
+    runtime.controls.target.set(0, .45, 0);
+    if (view === "top") runtime.camera.position.set(.05, 11.6, .08);
+    else if (view === "side") runtime.camera.position.set(0, 2.75, 13.4);
+    else runtime.camera.position.set(5.9, 3.7, 10.2);
     runtime.controls.update();
   }, []);
 
@@ -588,7 +661,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
             onPointerUp={endCanvasDrag}
             onPointerCancel={endCanvasDrag}
           >
-            <div ref={hostRef} className="three-host" aria-label="可交互的 JJY 型分光计三维模型" />
+            <div ref={hostRef} className="three-host" aria-label="可交互的高保真分光计三维模型" />
             <div className="scene-grid" aria-hidden="true" />
             <div className="scene-badges">
               <span className={lampOn ? "is-on" : ""}><i />汞灯 {lampOn ? "已开启" : "已关闭"}</span>
@@ -607,7 +680,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
                 <button className={mouseTool === "stage" ? "active" : ""} onClick={() => setMouseTool("stage")}><Rotate3D size={15} />载物台</button>
               </div>
             </div>
-            {showLabels && <div className="scene-part-labels" aria-hidden="true"><span className="label-collimator">准直管</span><span className="label-stage">光栅载物台</span><span className="label-telescope">望远镜</span></div>}
+            {showLabels && <div className="scene-part-labels" aria-hidden="true"><span className="label-lamp">汞灯光源</span><span className="label-collimator">平行光管</span><span className="label-stage">载物台光栅</span><span className="label-telescope">望远镜</span></div>}
           </div>
 
           <div className="instrument-control-deck">
