@@ -332,33 +332,37 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       addHorizontalTube(parent, radius, radius, length, position, meshMaterial);
       for (let index = -4; index <= 4; index++) addRing(parent, [position[0] + index * length / 10, position[1], position[2]], radius + .01, .013, sootBlack);
     };
-    const addCastBaseArm = (parent: THREE.Object3D, angle: number) => {
-      // The laboratory instrument uses a broad, three-point cast base rather than
-      // a straight rail. This tapered outline keeps the optical assembly unchanged
-      // while matching the rounded tripod feet visible in the reference photos.
+    const addCastTripodBase = (parent: THREE.Object3D) => {
+      // A single continuous three-lobed casting. The varying polar radius produces
+      // the broad rounded nose and smooth valleys of the physical spectrometer base.
       const outline = new THREE.Shape();
-      outline.moveTo(.18, -.55);
-      outline.bezierCurveTo(.72, -.52, 1.05, -.4, 1.39, -.38);
-      outline.bezierCurveTo(1.72, -.5, 2.03, -.3, 2.05, 0);
-      outline.bezierCurveTo(2.03, .3, 1.72, .5, 1.39, .38);
-      outline.bezierCurveTo(1.05, .4, .72, .52, .18, .55);
+      const points = 144;
+      for (let index = 0; index <= points; index++) {
+        const angle = Math.PI / 2 + index / points * Math.PI * 2;
+        const lobe = (1 + Math.cos(3 * (angle - Math.PI / 2))) / 2;
+        const radius = .88 + 1.17 * Math.pow(lobe, .58);
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        if (index === 0) outline.moveTo(x, z);
+        else outline.lineTo(x, z);
+      }
       outline.closePath();
       const geometry = new THREE.ExtrudeGeometry(outline, {
-        depth: .3,
+        depth: .34,
         bevelEnabled: true,
-        bevelSegments: 4,
-        bevelSize: .09,
-        bevelThickness: .07,
-        curveSegments: 18,
+        bevelSegments: 5,
+        bevelSize: .1,
+        bevelThickness: .08,
+        curveSegments: 24,
       });
-      geometry.translate(0, 0, -.15);
-      const arm = new THREE.Mesh(geometry, baseGray);
-      arm.rotation.set(Math.PI / 2, angle, 0);
-      arm.position.set(0, -.64, .03);
-      arm.castShadow = true;
-      arm.receiveShadow = true;
-      parent.add(arm);
-      return arm;
+      geometry.translate(0, 0, -.17);
+      const base = new THREE.Mesh(geometry, baseGray);
+      base.rotation.x = Math.PI / 2;
+      base.position.set(0, -.66, .03);
+      base.castShadow = true;
+      base.receiveShadow = true;
+      parent.add(base);
+      return base;
     };
 
     const whiteBase = addBox(scene, [12.4, .14, 5.8], [0, -.98, 0], groundMaterial);
@@ -422,22 +426,21 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     };
     for (let degree = 0; degree < 360; degree += 10) addScaleNumber(degree);
 
-    // Cast-aluminium tripod base: one forward leg and two rear legs, as on the
-    // physical spectrometer. The feet stay below the fixed main scale, so none of
-    // the angle, vernier, or ray geometry is affected by this visual correction.
+    // One-piece cast-aluminium tripod base, matching the physical instrument.
+    // It remains below the fixed main scale, so angle and ray geometry is unchanged.
     const baseLegAngles = [Math.PI / 2, Math.PI * 7 / 6, Math.PI * 11 / 6];
-    baseLegAngles.forEach((angle) => addCastBaseArm(instrument, angle));
-    addVerticalTube(instrument, .78, .92, .3, [0, -.52, .03], baseGray, 48);
-    addVerticalTube(instrument, .58, .72, .12, [0, -.32, .03], railMetal, 48);
+    addCastTripodBase(instrument);
+    addVerticalTube(instrument, .6, .72, .25, [0, -.43, .03], baseGray, 48);
+    addVerticalTube(instrument, .54, .61, .1, [0, -.255, .03], railMetal, 48);
     addVerticalTube(instrument, .5, .56, .16, [0, -.05, .03], darkGray, 40);
     addVerticalTube(instrument, .31, .38, .72, [0, .34, .03], baseGray, 36);
     addVerticalTube(instrument, .58, .61, .13, [0, .76, .03], darkGray, 48);
     addVerticalTube(instrument, .5, .5, .06, [0, .855, .03], aluminum, 48);
     for (const angle of baseLegAngles) {
-      const x = Math.cos(angle) * 1.72;
-      const z = .03 - Math.sin(angle) * 1.72;
-      addVerticalTube(instrument, .075, .095, .2, [x, -.82, z], carbon, 18);
-      addVerticalTube(instrument, .17, .15, .08, [x, -.935, z], matteBlack, 24);
+      const x = Math.cos(angle) * 1.78;
+      const z = .03 + Math.sin(angle) * 1.78;
+      addVerticalTube(instrument, .065, .08, .12, [x, -.86, z], carbon, 18);
+      addVerticalTube(instrument, .14, .13, .06, [x, -.94, z], matteBlack, 24);
     }
 
     const bench = new THREE.Group();
