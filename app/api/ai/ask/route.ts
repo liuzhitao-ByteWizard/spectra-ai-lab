@@ -1,4 +1,8 @@
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { env } from "cloudflare:workers";
+import { sql } from "drizzle-orm";
+import { getSiteUser } from "@/app/site-auth";
+import { getDb } from "@/db";
+import { aiUsageDaily } from "@/db/schema";
 
 const referenceNotes = [
   "汞灯黄色谱线包含 576.96 nm 与 579.07 nm 两条相近跃迁。实验中应先放大并分别对中，再记录各自读数。",
@@ -7,6 +11,9 @@ const referenceNotes = [
   "过曝会把窄谱线扩成宽亮带，使峰位和黄双线间距失真。应降低曝光，直到谱线中心仍有亮度梯度。",
   "全部谱线同向偏移应先复核零级；蓝紫端系统残差可作为镜头畸变诊断，但不应增加自由参数掩盖 d–L 相关性。",
 ];
+
+const DAILY_QUESTION_LIMIT = 30;
+const MAX_QUESTION_CHARACTERS = 4_000;
 
 const systemPrompt = `你是一个通用型 AI 助手，同时具备大学物理分光计与光栅实验的专业辅导能力。
 你可以回答用户提出的各类安全、合法问题，包括通用知识、学习辅导、写作整理、编程分析、生活建议和物理实验；不要把非物理问题强行引向物理实验。
@@ -32,8 +39,22 @@ function normalizeAnswer(content: string) {
     .replace(/\\cdot\b/g, "·");
 }
 
+async function reserveDailyQuestion(userId: string) {
+  const day = new Date().toISOString().slice(0, 10);
+  const [usage] = await getDb()
+    .insert(aiUsageDaily)
+    .values({ userId, day, requestCount: 1 })
+    .onConflictDoUpdate({
+      target: [aiUsageDaily.userId, aiUsageDaily.day],
+      set: { requestCount: sql`${aiUsageDaily.requestCount} + 1` },
+    })
+    .returning({ requestCount: aiUsageDaily.requestCount });
+
+  return usage.requestCount <= DAILY_QUESTION_LIMIT;
+}
+
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getSiteUser();
   if (!user) return Response.json({ error: "请先登录后使用 AI 助教" }, { status: 401 });
 
   const body = (await request.json()) as { question?: string };
@@ -42,8 +63,15 @@ export async function POST(request: Request) {
   if (!question) {
     return Response.json({ error: "请输入问题" }, { status: 400 });
   }
+  if (question.length > MAX_QUESTION_CHARACTERS) {
+    return Response.json({ error: "单次提问不能超过 4000 个字符" }, { status: 400 });
+  }
 
-  const apiKey = process.env.DEEPSEEK_API_KEY;
+  const runtimeEnv = env as typeof env & {
+    DEEPSEEK_API_KEY?: string;
+    DEEPSEEK_MODEL?: string;
+  };
+  const apiKey = runtimeEnv.DEEPSEEK_API_KEY || process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
     return Response.json(
       { error: "AI 助教尚未配置服务密钥" },
@@ -51,8 +79,20 @@ export async function POST(request: Request) {
     );
   }
 
+  try {
+    const allowed = await reserveDailyQuestion(user.userId);
+    if (!allowed) {
+      return Response.json(
+        { error: `今日 AI 提问已达 ${DAILY_QUESTION_LIMIT} 次上限，请明天再试` },
+        { status: 429 },
+      );
+    }
+  } catch {
+    return Response.json({ error: "AI 助教暂时不可用，请稍后重试" }, { status: 503 });
+  }
+
   const requestBody = JSON.stringify({
-    model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+    model: runtimeEnv.DEEPSEEK_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: question },

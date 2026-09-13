@@ -325,7 +325,7 @@ async function analyzeImageFile(file: File): Promise<SpectrumSource> {
   };
 }
 
-function AppHeader({ active, onChange, authenticated, authHref, authLabel, viewerName }: { active: ModuleId; onChange: (id: ModuleId) => void; authenticated: boolean; authHref: string; authLabel: string; viewerName: string | null }) {
+function AppHeader({ active, onChange, authenticated, authHref, authLabel, viewerName }: { active: ModuleId; onChange: (id: ModuleId) => void; authenticated: boolean; authHref: string | null; authLabel: string; viewerName: string | null }) {
   return (
     <header className="topbar">
       <button className="brand" onClick={() => onChange("home")} aria-label="返回首页">
@@ -337,7 +337,7 @@ function AppHeader({ active, onChange, authenticated, authHref, authLabel, viewe
       </nav>
       <div className="topbar-actions">
         <button className="ghost-button" onClick={() => toast.info("主流程：虚拟预习 → 采集质检 → 零级与汞线匹配 → d 与不确定度 → 云端复盘")}><CircleHelp size={17} /> 流程帮助</button>
-        <a className="auth-link" href={authHref} target="_top" title={viewerName ?? authLabel}>{authenticated ? <LogOut size={16} /> : <LogIn size={16} />}{authLabel}</a>
+        {authHref ? <a className="auth-link" href={authHref} target="_top" title={viewerName ?? authLabel}>{authenticated ? <LogOut size={16} /> : <LogIn size={16} />}{authLabel}</a> : authenticated ? <span className="auth-link" title={viewerName ?? authLabel}><CheckCircle2 size={16} />{authLabel}</span> : null}
       </div>
     </header>
   );
@@ -479,7 +479,7 @@ function SimulatorModule({ journey, navigate, updateJourney }: { journey: Experi
   return <VirtualSpectrometer3D journey={journey} navigate={navigate} updateJourney={updateJourney} />;
 }
 
-function AssistantModule({ journey, navigate, authenticated, authHref }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void; authenticated: boolean; authHref: string }) {
+function AssistantModule({ journey, navigate, authenticated, authHref }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void; authenticated: boolean; authHref: string | null }) {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string; source?: string }[]>([{ role: "assistant", text: "你好，我是你的 AI 助教。我重点辅导分光计与光栅实验，也可以帮助你理解课程知识、润色文字和分析编程问题。直接告诉我你现在遇到的困难。", source: "AI 助教 · 物理实验与通用问答" }]);
   const [sending, setSending] = useState(false);
@@ -493,7 +493,7 @@ function AssistantModule({ journey, navigate, authenticated, authHref }: { journ
     finally { setSending(false); }
   };
   return <div className="module-page"><FlowBanner stage="实验助教 · 只读当前流程数据" navigate={navigate} /><PageHeading eyebrow="AI 助教 · 当前实验上下文" title="分析实验现象，帮你理清下一步。" description={`当前匹配 ${journey.identification.matchedLines} 条参考线；${journey.inversion.reportable ? "反演结果已通过检查" : journey.inversion.blockReason}`} />
-    {!authenticated && <p className="auth-notice">匿名访问可浏览实验内容；<a href={authHref} target="_top">登录 ChatGPT</a> 后可使用 AI 助教并保存个人实验记录。</p>}
+    {!authenticated && <p className="auth-notice">请先完成登录后使用 AI 助教并保存个人实验记录。{authHref && <> <a href={authHref} target="_top">登录 ChatGPT</a></>}</p>}
     <div className="assistant-grid"><aside className="question-bank panel"><div className="panel-title"><div><span className="step-index"><BookOpen size={15} /></span><h2>试试这样问</h2></div></div><div className="quick-questions">{["为什么黄光是两条？", "帮我制定一份复习计划", "解释一个陌生概念", "帮我润色一段文字", "给我一个编程思路"].map((text) => <button key={text} onClick={() => ask(text)}><MessageCircle size={15} />{text}<ChevronRight size={15} /></button>)}</div><div className="knowledge-scope"><strong>能力范围</strong><span>分光计实验</span><span>物理实验</span><span>课程答疑</span><span>写作润色</span><span>编程分析</span></div></aside>
       <section className="chat-panel panel"><div className="chat-status"><span><i />{authenticated ? "AI 助教在线" : "登录后启用 AI 助教"}</span><em>物理实验 · 通用问答</em></div><div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}><span>{message.role === "assistant" ? <Bot size={17} /> : "你"}</span><div>{message.role === "assistant" ? <AssistantAnswer>{message.text}</AssistantAnswer> : <p>{message.text}</p>}{message.source && <small><BookOpen size={12} />{message.source}</small>}</div></div>)}{sending && <div className="message assistant"><span><Bot size={17} /></span><div><p>AI 助教正在分析问题…</p></div></div>}</div><form className="chat-input" onSubmit={(e) => { e.preventDefault(); ask(); }}><textarea value={question} onChange={(e) => setQuestion(e.target.value)} disabled={!authenticated} placeholder={authenticated ? "问分光计实验、课程、写作、编程或日常问题…" : "登录后即可提问"} /><button type="submit" aria-label="发送问题" disabled={!authenticated}><Send size={18} /></button></form><p className="chat-hint">AI 可能出错，重要信息请结合可靠来源核实。</p></section></div>
   </div>;
@@ -1000,7 +1000,7 @@ function GuideModule({ journey, navigate }: { journey: ExperimentJourney; naviga
   </div>;
 }
 
-function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: ModuleId) => void; authenticated: boolean; authHref: string }) {
+function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: ModuleId) => void; authenticated: boolean; authHref: string | null }) {
   const [records, setRecords] = useState<SavedRecord[]>([]); const [loading, setLoading] = useState(authenticated); const [selected, setSelected] = useState<SavedRecord | null>(null);
   const [errorMessage, setErrorMessage] = useState(""); const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const refresh = useCallback(async () => {
@@ -1029,7 +1029,7 @@ function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: M
   const exportCsv = () => { const rows = [["最后更新", "任务", "光源", "状态", "结果", "质量"], ...records.map((r) => [formatChinaDateTime(r.updatedAt), r.task, r.source, r.status === "draft" ? "进行中" : r.status === "needs_review" ? "需复核" : "已完成", r.resultValue, r.quality])]; downloadFile("spectra-experiments.csv", rows.map((row) => row.map((v) => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"), "text/csv"); };
   const markerCount = Array.isArray(selected?.payload.referenceMarkers) ? selected.payload.referenceMarkers.length : 0;
   const imageEntries = selected ? Object.entries(selected.imageUrls) as [ExperimentImageSlot, string][] : [];
-  if (!authenticated) return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="登录后查看你的实验记录。" description="匿名访问不会读取或保存个人数据。登录后可在不同设备间同步记录、图片与实验报告。" action={<a className="primary-action" href={authHref} target="_top"><LogIn size={16} />登录 ChatGPT</a>} /><div className="panel record-empty"><History size={34} /><strong>个人记录受到登录保护</strong><p>站点其余实验模块仍可匿名浏览和操作。</p></div></div>;
+  if (!authenticated) return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="登录后查看你的实验记录。" description="未登录状态不会读取或保存个人数据。登录后可在不同设备间同步记录、图片与实验报告。" action={authHref ? <a className="primary-action" href={authHref} target="_top"><LogIn size={16} />登录 ChatGPT</a> : undefined} /><div className="panel record-empty"><History size={34} /><strong>个人记录受到登录保护</strong><p>完成邮箱验证后即可自动保存与跨设备查看。</p></div></div>;
   return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="回看每次实验，复核过程与结果。" description="查看实验步骤、原始光谱、测量结果与异常诊断；支持导出 CSV 和实验报告。" action={<button className="secondary-action" onClick={exportCsv} disabled={!records.length}><Download size={16} />导出全部 CSV</button>} />
     <div className={`records-sync ${errorMessage ? "error" : ""}`} aria-live="polite">{errorMessage ? <><CircleAlert size={15} /><span>{errorMessage}</span><button onClick={() => void refresh()}>重新加载</button></> : <><CheckCircle2 size={15} /><span>{lastUpdated ? `云端记录已更新 · ${formatChinaClock(lastUpdated)}` : "正在连接云端记录"}</span></>}</div>
     <div className="records-grid"><section className="panel record-list"><div className="panel-title"><div><span className="step-index"><History size={14} /></span><h2>我的实验</h2></div><span>{records.length} 条</span></div>{loading ? <div className="record-empty">正在读取实验记录…</div> : records.length ? records.map((record) => <button key={record.id} className={selected?.id === record.id ? "active" : ""} onClick={() => setSelected(record)}><span className="record-source"><Waves size={18} /></span><div><strong>{record.resultLabel}<small>{record.resultValue}</small></strong><p><Clock3 size={12} />{formatChinaDateTime(record.updatedAt)} · {record.source}</p></div><em className={record.status === "completed" ? "good" : ""}>{record.status === "draft" ? "进行中" : record.status === "needs_review" ? "需复核" : "已完成"}</em></button>) : <div className="record-empty"><History size={30} /><strong>还没有实验记录</strong><p>上传光谱图片后，实验过程会自动同步并出现在这里。</p></div>}</section>
@@ -1043,7 +1043,7 @@ declare global {
   interface Document { modelContext?: { registerTool: (tool: { name: string; title: string; description: string; inputSchema: object; annotations: { readOnlyHint: boolean; untrustedContentHint: boolean }; execute: (input: unknown) => unknown }, options?: { signal?: AbortSignal }) => void | Promise<void> } }
 }
 
-export default function SpectraApp({ authenticated, viewerName, authHref, authLabel }: { authenticated: boolean; viewerName: string | null; authHref: string; authLabel: string }) {
+export default function SpectraApp({ authenticated, viewerName, authHref, authLabel }: { authenticated: boolean; viewerName: string | null; authHref: string | null; authLabel: string }) {
   const [active, setActive] = useState<ModuleId>("home"); const [analyzeSignal, setAnalyzeSignal] = useState(0);
   const [journey, setJourney] = useState<ExperimentJourney>(() => structuredClone(emptyJourney));
   const journeyLoadedRef = useRef(false);

@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getSiteUser } from "@/app/site-auth";
 import { getDb } from "@/db";
 import { experimentJourneys } from "@/db/schema";
 import { emptyJourney, mergeJourney } from "@/lib/experiment-journey";
@@ -7,7 +7,7 @@ import { noStoreJson } from "../records/record-server";
 
 export async function GET() {
   try {
-    const user = await getChatGPTUser();
+    const user = await getSiteUser();
     if (!user) return noStoreJson({ error: "请先登录后恢复实验流程" }, { status: 401 });
     const [row] = await getDb().select().from(experimentJourneys)
       .where(eq(experimentJourneys.userId, user.userId)).limit(1);
@@ -20,7 +20,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const user = await getChatGPTUser();
+    const user = await getSiteUser();
     if (!user) return noStoreJson({ error: "请先登录后保存实验流程" }, { status: 401 });
     const body = await request.json() as { journey?: unknown };
     const journey = mergeJourney(body.journey);
@@ -38,7 +38,7 @@ export async function PUT(request: Request) {
 
 export async function DELETE() {
   try {
-    const user = await getChatGPTUser();
+    const user = await getSiteUser();
     if (!user) return noStoreJson({ error: "请先登录后重置实验流程" }, { status: 401 });
     await getDb().delete(experimentJourneys).where(eq(experimentJourneys.userId, user.userId));
     return noStoreJson({ journey: structuredClone(emptyJourney) });

@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getSiteUser } from "@/app/site-auth";
 import { getDb } from "@/db";
 import { experiments } from "@/db/schema";
 import { serializeRecord } from "../../record-server";
@@ -9,7 +9,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, context: RouteContext) {
   try {
-    const user = await getChatGPTUser();
+    const user = await getSiteUser();
     if (!user) return new Response("请先登录后查看实验报告", { status: 401 });
     const { id } = await context.params;
     const [record] = await getDb().select().from(experiments)

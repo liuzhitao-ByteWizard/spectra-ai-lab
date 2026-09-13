@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { and, eq, sql } from "drizzle-orm";
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getSiteUser } from "@/app/site-auth";
 import { getDb } from "@/db";
 import { experiments } from "@/db/schema";
 import type { ExperimentImageSlot } from "@/lib/experiment-record";
@@ -16,7 +16,7 @@ function imageSlot(request: Request): ExperimentImageSlot | null {
 
 export async function GET(request: Request, context: RouteContext) {
   try {
-    const user = await getChatGPTUser();
+    const user = await getSiteUser();
     if (!user) return noStoreJson({ error: "请先登录后查看原始图片" }, { status: 401 });
     if (!env.BUCKET) return noStoreJson({ error: "图片存储暂不可用" }, { status: 503 });
     const slot = imageSlot(request);
@@ -42,7 +42,7 @@ export async function GET(request: Request, context: RouteContext) {
 
 export async function POST(request: Request, context: RouteContext) {
   try {
-    const user = await getChatGPTUser();
+    const user = await getSiteUser();
     if (!user) return noStoreJson({ error: "请先登录后同步原始图片" }, { status: 401 });
     if (!env.BUCKET) return noStoreJson({ error: "图片存储暂不可用" }, { status: 503 });
     const slot = imageSlot(request);

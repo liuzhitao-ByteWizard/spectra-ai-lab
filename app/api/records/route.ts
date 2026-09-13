@@ -1,12 +1,12 @@
 import { and, desc, eq, gt } from "drizzle-orm";
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getSiteUser } from "@/app/site-auth";
 import { getDb } from "@/db";
 import { experiments } from "@/db/schema";
 import { noStoreJson, parseRecordBody, serializeRecord } from "./record-server";
 
 export async function GET(request: Request) {
   try {
-    const user = await getChatGPTUser();
+    const user = await getSiteUser();
     if (!user) return noStoreJson({ error: "请先登录后同步实验记录" }, { status: 401 });
 
     const url = new URL(request.url);
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const user = await getChatGPTUser();
+    const user = await getSiteUser();
     if (!user) return noStoreJson({ error: "请先登录后保存实验记录" }, { status: 401 });
 
     const body = (await request.json()) as Record<string, unknown>;

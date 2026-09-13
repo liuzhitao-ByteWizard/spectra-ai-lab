@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getSiteUser } from "@/app/site-auth";
 import { getDb } from "@/db";
 import { experiments } from "@/db/schema";
 import { noStoreJson, parseRecordBody, serializeRecord } from "../record-server";
@@ -8,7 +8,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, context: RouteContext) {
   try {
-    const user = await getChatGPTUser();
+    const user = await getSiteUser();
     if (!user) return noStoreJson({ error: "请先登录后读取实验记录" }, { status: 401 });
     const { id } = await context.params;
     const [record] = await getDb().select().from(experiments)
@@ -23,7 +23,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
 export async function PATCH(request: Request, context: RouteContext) {
   try {
-    const user = await getChatGPTUser();
+    const user = await getSiteUser();
     if (!user) return noStoreJson({ error: "请先登录后更新实验记录" }, { status: 401 });
     const { id } = await context.params;
     const body = (await request.json()) as Record<string, unknown>;

@@ -1,14 +1,15 @@
 import SpectraApp from "./SpectraApp";
-import { chatGPTSignInPath, chatGPTSignOutPath, getChatGPTUser } from "./chatgpt-auth";
+import { getAuthenticationAction, getSiteUser } from "./site-auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const user = await getChatGPTUser();
+  const user = await getSiteUser();
+  const authenticationAction = getAuthenticationAction(user);
   return <SpectraApp
     authenticated={Boolean(user)}
     viewerName={user?.fullName ?? user?.email ?? null}
-    authHref={user ? chatGPTSignOutPath("/") : chatGPTSignInPath("/")}
-    authLabel={user ? "退出登录" : "登录并保存记录"}
+    authHref={authenticationAction.href}
+    authLabel={authenticationAction.label}
   />;
 }
