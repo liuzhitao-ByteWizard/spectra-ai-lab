@@ -340,6 +340,60 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const instrument = new THREE.Group();
     scene.add(instrument);
 
+    // The dial is deliberately independent from the telescope: the main scale is fixed
+    // to the base while the two verniers travel with the telescope assembly below.
+    const dialY = .84;
+    const mainDial = new THREE.Group();
+    instrument.add(mainDial);
+    addVerticalTube(mainDial, 1.82, 1.82, .07, [0, dialY, .03], railMetal, 96);
+    addVerticalTube(mainDial, 1.69, 1.69, .024, [0, dialY + .046, .03], brightMetal, 96);
+    addVerticalTube(mainDial, 1.28, 1.28, .08, [0, dialY + .006, .03], darkGray, 96);
+    const scaleRing = new THREE.Mesh(
+      new THREE.RingGeometry(1.3, 1.71, 128),
+      new THREE.MeshStandardMaterial({ color: "#e5e1d1", metalness: .18, roughness: .6, side: THREE.DoubleSide }),
+    );
+    scaleRing.rotation.x = -Math.PI / 2;
+    scaleRing.position.set(0, dialY + .065, .03);
+    scaleRing.receiveShadow = true;
+    mainDial.add(scaleRing);
+
+    const scaleTickMaterial = new THREE.MeshBasicMaterial({ color: "#1a1b1f" });
+    for (let degree = 0; degree < 360; degree++) {
+      const rad = toRadians(degree);
+      const length = degree % 10 === 0 ? .18 : degree % 5 === 0 ? .125 : .07;
+      const radius = 1.685 - length / 2;
+      const tick = new THREE.Mesh(new THREE.BoxGeometry(.014, .022, length), scaleTickMaterial);
+      tick.position.set(Math.cos(rad) * radius, dialY + .085, .03 + Math.sin(rad) * radius);
+      tick.rotation.y = Math.PI / 2 - rad;
+      mainDial.add(tick);
+    }
+
+    const addScaleNumber = (degree: number) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 160;
+      canvas.height = 80;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#222328";
+      context.font = "500 34px Arial, sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(String(degree), canvas.width / 2, canvas.height / 2 + 1);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.LinearFilter;
+      const label = new THREE.Mesh(
+        new THREE.PlaneGeometry(.28, .14),
+        new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, side: THREE.DoubleSide }),
+      );
+      const rad = toRadians(degree);
+      label.rotation.x = -Math.PI / 2;
+      label.position.set(Math.cos(rad) * 1.43, dialY + .102, .03 + Math.sin(rad) * 1.43);
+      mainDial.add(label);
+    };
+    for (let degree = 0; degree < 360; degree += 10) addScaleNumber(degree);
+
     const carriage = new THREE.Mesh(new THREE.CapsuleGeometry(.38, 2.58, 8, 24), baseGray);
     carriage.rotation.z = Math.PI / 2;
     carriage.position.set(-.05, -.43, .12);
@@ -434,6 +488,40 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     addHorizontalTube(telescopeGroup, .24, .38, .2, [4.13, opticalAxisY, .03], matteBlack);
     addVerticalTube(telescopeGroup, .095, .12, .64, [3.76, 1.12, .03], sootBlack, 18);
     addRing(telescopeGroup, [3.76, 1.4, .03], .115, .02, carbon);
+
+    const vernierPlateMaterial = new THREE.MeshStandardMaterial({
+      color: "#efead8", metalness: .16, roughness: .55, transparent: true, opacity: .88, side: THREE.DoubleSide,
+    });
+    const vernierTickMaterial = new THREE.MeshBasicMaterial({ color: "#111216" });
+    const makeVernier = (opposite: boolean) => {
+      const vernier = new THREE.Group();
+      vernier.rotation.y = opposite ? Math.PI : 0;
+      telescopeGroup.add(vernier);
+      const sector = new THREE.Mesh(
+        new THREE.RingGeometry(1.31, 1.72, 32, 1, -.18, .36),
+        vernierPlateMaterial,
+      );
+      sector.rotation.x = -Math.PI / 2;
+      sector.position.set(0, dialY + .117, .03);
+      vernier.add(sector);
+      for (let index = 0; index <= 10; index++) {
+        const rad = -.165 + index * .033;
+        const length = index === 5 ? .16 : index % 2 === 0 ? .11 : .075;
+        const radius = 1.69 - length / 2;
+        const tick = new THREE.Mesh(new THREE.BoxGeometry(.013, .024, length), vernierTickMaterial);
+        tick.position.set(Math.cos(rad) * radius, dialY + .136, .03 + Math.sin(rad) * radius);
+        tick.rotation.y = Math.PI / 2 - rad;
+        vernier.add(tick);
+      }
+      const indexLine = new THREE.Mesh(new THREE.BoxGeometry(.43, .028, .025), vernierTickMaterial);
+      indexLine.position.set(1.505, dialY + .142, .03);
+      vernier.add(indexLine);
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(.055, .055, .035, 20), brightMetal);
+      hub.position.set(1.28, dialY + .13, .03);
+      vernier.add(hub);
+    };
+    makeVernier(false);
+    makeVernier(true);
 
     const beams = new THREE.Group();
     instrument.add(beams);
