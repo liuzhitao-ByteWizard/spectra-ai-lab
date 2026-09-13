@@ -6,6 +6,7 @@ const projectRoot = resolve(import.meta.dirname, "..");
 const clientDirectory = resolve(projectRoot, "dist", "client");
 const serverDirectory = resolve(projectRoot, "dist", "server");
 const pagesDirectory = resolve(projectRoot, "dist-pages");
+const generatedDeploymentConfig = resolve(projectRoot, ".wrangler", "deploy", "config.json");
 
 await Promise.all([
   access(clientDirectory),
@@ -28,5 +29,9 @@ await build({
   external: ["cloudflare:workers"],
   logLevel: "info",
 });
+
+// Vinext leaves a local Worker deployment pointer behind after building. Pages
+// deployments must load this project's Pages configuration instead.
+await rm(generatedDeploymentConfig, { force: true });
 
 console.log(`Cloudflare Pages output prepared at ${pagesDirectory}`);
