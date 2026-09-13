@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   Aperture, ArrowLeft, ArrowRight, BarChart3, BookOpen, Bot, Camera, Check,
   CheckCircle2, ChevronRight, CircleAlert, CircleHelp, ClipboardCheck, Clock3,
@@ -15,14 +16,19 @@ import { Progress } from "@/components/ui/progress";
 import AssistantAnswer from "./AssistantAnswer";
 import AuroraField from "./AuroraField";
 import {
-  diffractionAngle, fitGratingFromPixels, measureGrating,
-  SPECTRAL_LIBRARY, type MeasurementLine,
+  fitGratingFromPixels,
+  SPECTRAL_LIBRARY,
 } from "@/lib/spectrometer";
 import {
   RecordRequestError, requestRecordJson, type ExperimentImageSlot,
   type ExperimentTask, type RecordSnapshot, type SavedRecord,
 } from "@/lib/experiment-record";
 import { emptyJourney, mergeJourney, type ExperimentJourney } from "@/lib/experiment-journey";
+
+const VirtualSpectrometer3D = dynamic(() => import("./VirtualSpectrometer3D"), {
+  ssr: false,
+  loading: () => <div className="virtual-lab-loading"><Telescope size={28} /><strong>正在加载三维分光计</strong><span>仪器模型与实时光路准备中…</span></div>,
+});
 
 type ModuleId = "home" | "simulator" | "assistant" | "analysis" | "guide" | "records";
 type Peak = { x: number; xRatio: number; family: string; color: string; confidence: number; prominence: number; widthPx: number; wavelengthNm?: number };
@@ -470,49 +476,7 @@ function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
 }
 
 function SimulatorModule({ journey, navigate, updateJourney }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void; updateJourney: (patch: Partial<ExperimentJourney>) => void }) {
-  const lines = SPECTRAL_LIBRARY.mercury.map((line) => ({ ...line, angle: diffractionAngle(line.wavelengthNm, 3.333, 1) })).filter((line) => line.angle !== null);
-  const [angle, setAngle] = useState(9.43);
-  const [captured, setCaptured] = useState<MeasurementLine[]>(() => lines.slice(0, journey.prelab.capturedLines).map((line) => ({ wavelengthNm: line.wavelengthNm, thetaDeg: line.angle ?? 0 })));
-  const nearest = lines.reduce((best, line) => Math.abs((line.angle ?? 0) - angle) < Math.abs((best.angle ?? 0) - angle) ? line : best, lines[0]);
-  const aligned = nearest && Math.abs((nearest.angle ?? 0) - angle) < .12;
-  const fit = captured.length >= 2 ? measureGrating(captured) : null;
-  useEffect(() => {
-    updateJourney({ prelab: { source: "mercury", capturedLines: captured.length, dUm: fit?.dUm ?? null, rmseNm: fit?.rmseNm ?? null } });
-  }, [captured.length, fit?.dUm, fit?.rmseNm, updateJourney]);
-  const capture = () => {
-    if (!aligned || !nearest) return toast.warning("先缓慢转动望远镜，让谱线与叉丝重合");
-    if (captured.some((item) => item.wavelengthNm === nearest.wavelengthNm)) return toast.info("这条谱线已经记录");
-    setCaptured((items) => [...items, { wavelengthNm: nearest.wavelengthNm, thetaDeg: angle }]);
-    toast.success(`已记录 ${nearest.wavelengthNm.toFixed(2)} nm`);
-  };
-  return (
-    <div className="module-page">
-      <FlowBanner stage="1 / 5 · 虚拟预习" navigate={navigate} />
-      <PageHeading eyebrow="预习 · 虚拟分光计" title="先在屏幕上完成一次真实逻辑的实验。" description="拖转望远镜、让谱线与叉丝重合、记录角度，再用光栅方程拟合 d。虚拟仪器用于预习，数值以真机为准。" />
-      <div className="sim-grid">
-        <section className="panel simulator-panel">
-          <div className="sim-toolbar">
-            <div className="segmented"><button className="active">汞灯已知谱线</button></div>
-            <label>测量范围<select value="1" disabled><option value="1">单侧一级</option></select></label>
-          </div>
-          <div className="instrument-scene">
-            <div className="instrument-base"><span className="angle-ring" /><span className="grating-table"><i /></span><span className="collimator" /><span className="telescope-arm" style={{ transform: `rotate(${-34 + angle * 2.2}deg)` }}><i /></span></div>
-            <div className="angle-readout"><small>望远镜方向 φ</small><strong>{angle.toFixed(2)}°</strong><span>{aligned ? "已对准，可读数" : `距最近谱线 ${Math.abs((nearest?.angle ?? 0) - angle).toFixed(2)}°`}</span></div>
-          </div>
-          <div className="scope-view">
-            <span className="scope-ring" /><span className="scope-cross x" /><span className="scope-cross y" />
-            {lines.map((line) => <i key={line.wavelengthNm} style={{ left: `${50 + ((line.angle ?? 0) - angle) * 42}%`, background: line.color, opacity: line.intensity }} />)}
-            {aligned && <b>谱线已落在叉丝中心</b>}
-          </div>
-          <div className="angle-control"><label htmlFor="telescope-angle"><SlidersHorizontal size={17} />拖转望远镜</label><input id="telescope-angle" type="range" min="5" max="22" step="0.01" value={angle} onChange={(e) => setAngle(Number(e.target.value))} /><button onClick={capture}><Target size={17} />记录当前谱线</button></div>
-        </section>
-        <aside className="panel task-panel">
-          <div className="panel-title"><div><span className="step-index">TASK</span><h2>预习任务</h2></div><span className="status-pill">{captured.length}/{Math.min(lines.length, 5)} 已记录</span></div>
-          <div className="task-body"><p className="task-tip"><Lightbulb size={16} />按波长从短到长瞄准一级谱线，至少记录两条；拟合生成后阶段自动完成。</p><div className="target-list">{lines.slice(0, 5).map((line) => { const done = captured.some((item) => item.wavelengthNm === line.wavelengthNm); return <button key={line.wavelengthNm} onClick={() => setAngle(line.angle ?? angle)}><i style={{ background: line.color }} /><span>{line.wavelengthNm.toFixed(2)} nm<small>{done ? `${captured.find((item) => item.wavelengthNm === line.wavelengthNm)?.thetaDeg.toFixed(2)}°` : "待瞄准"}</small></span>{done ? <CheckCircle2 size={18} /> : <Target size={17} />}</button>; })}</div>{fit ? <div className="fit-result"><small>预习证据已生成</small><strong>d = {fit.dUm.toFixed(3)} μm</strong><span>{captured.length} 条谱线 · RMSE {fit.rmseNm.toFixed(2)} nm</span><button className="primary-action compact-action" onClick={() => navigate("guide")}>返回流程继续<ArrowRight size={15} /></button></div> : <div className="fit-placeholder"><BarChart3 size={28} /><p>记录两条以上谱线后生成<br />sinθ–λ 线性拟合</p></div>}<button className="reset-button" onClick={() => setCaptured([])}><RotateCcw size={15} />重新练习</button></div>
-        </aside>
-      </div>
-    </div>
-  );
+  return <VirtualSpectrometer3D journey={journey} navigate={navigate} updateJourney={updateJourney} />;
 }
 
 function AssistantModule({ journey, navigate, authenticated, authHref }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void; authenticated: boolean; authHref: string }) {
