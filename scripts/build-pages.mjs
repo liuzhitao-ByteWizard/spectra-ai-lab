@@ -6,6 +6,7 @@ const projectRoot = resolve(import.meta.dirname, "..");
 const clientDirectory = resolve(projectRoot, "dist", "client");
 const serverDirectory = resolve(projectRoot, "dist", "server");
 const pagesDirectory = resolve(projectRoot, "dist-pages");
+const pagesWorkerEntry = resolve(projectRoot, "scripts", "pages-worker-entry.mjs");
 const generatedDeploymentConfig = resolve(projectRoot, ".wrangler", "deploy", "config.json");
 
 await Promise.all([
@@ -20,7 +21,7 @@ await mkdir(pagesDirectory, { recursive: true });
 // root, while Vinext emits its public assets and Worker module tree separately.
 await cp(clientDirectory, pagesDirectory, { recursive: true });
 await build({
-  entryPoints: [resolve(serverDirectory, "index.js")],
+  entryPoints: [pagesWorkerEntry],
   outfile: resolve(pagesDirectory, "_worker.js"),
   bundle: true,
   format: "esm",
