@@ -2,20 +2,5 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "spectra-ai-lab",
   "pages_build_output_dir": "./dist-pages",
-  "compatibility_date": "2026-05-15",
-  "compatibility_flags": ["nodejs_compat"],
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "spectra-ai-lab-db",
-      "database_id": "1f7748b9-b954-4c8b-854f-f9b825480fd6",
-      "migrations_dir": "./drizzle"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "BUCKET",
-      "bucket_name": "spectra-ai-lab-files"
-    }
-  ]
+  "compatibility_date": "2026-05-15"
 }

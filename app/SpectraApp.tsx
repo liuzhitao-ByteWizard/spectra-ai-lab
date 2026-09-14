@@ -45,10 +45,10 @@ const formatChinaDateTime = (value: string | number) => new Date(value).toLocale
 const formatChinaClock = (value: string | number) => new Date(value).toLocaleTimeString("zh-CN", { timeZone: CHINA_TIME_ZONE, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const navItems: { id: ModuleId; label: string; icon: typeof Home }[] = [
   { id: "home", label: "首页", icon: Home },
-  { id: "simulator", label: "虚拟分光计", icon: Telescope },
-  { id: "assistant", label: "AI 助教", icon: Bot },
-  { id: "analysis", label: "图像分析", icon: ScanLine },
   { id: "guide", label: "实验引导", icon: ListChecks },
+  { id: "simulator", label: "虚拟分光计", icon: Telescope },
+  { id: "analysis", label: "图像分析", icon: ScanLine },
+  { id: "assistant", label: "AI 助教", icon: Bot },
   { id: "records", label: "实验记录", icon: History },
 ];
 
@@ -307,7 +307,7 @@ function AppHeader({ active, onChange, authenticated, authHref, authLabel, viewe
         <span><strong>SPECTRA</strong><small>分光计实验学习助手</small></span>
       </button>
       <nav className="main-nav" aria-label="主导航">
-        {navItems.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onChange(item.id)}>{item.label}</button>)}
+        {navItems.map((item) => <button key={item.id} className={`${active === item.id ? "active" : ""} ${item.id === "guide" ? "flow-entry" : ""}`} aria-current={active === item.id ? "page" : undefined} onClick={() => onChange(item.id)}>{item.label}</button>)}
       </nav>
       <div className="topbar-actions">
         <button className="ghost-button" onClick={() => toast.info("主流程：虚拟预习 → 零级参考图与 φ₀ → 一级单侧认线与 φᵢ → d 与不确定度 → 云端复盘")}><CircleHelp size={17} /> 流程帮助</button>
@@ -919,7 +919,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
     setAMarkers(markers);
     setZeroReading(typeof state.zeroReadingDeg === "number" ? state.zeroReadingDeg.toFixed(4) : "");
     if (typeof state.vernierResolutionArcmin === "number" && state.vernierResolutionArcmin > 0) setVernierResolutionArcmin(state.vernierResolutionArcmin);
-    setLineReadings(state.lineReadings && typeof state.lineReadings === "object" && !Array.isArray(state.lineReadings) ? Object.fromEntries(Object.entries(state.lineReadings as Record<string, unknown>).filter(([, value]) => typeof value === "string")) : {});
+    setLineReadings(state.lineReadings && typeof state.lineReadings === "object" && !Array.isArray(state.lineReadings) ? Object.fromEntries(Object.entries(state.lineReadings as Record<string, unknown>).filter(([, value]) => typeof value === "string")) as Record<string, string> : {});
     setAComplete(Boolean(state.complete));
     if (state.sample) { setASource(buildSampleSource()); setZeroSource({ ...buildSampleSource(), fileName: "零级参考示例" }); }
     else {
@@ -1008,7 +1008,10 @@ function GuideModule({ journey, navigate }: { journey: ExperimentJourney; naviga
   const current = guideSteps[step], state = states[step];
   const completed = states.filter((item) => item.done).length;
   return <div className="module-page"><PageHeading eyebrow="实验 · 主流程" title="每一阶段都由真实数据自动判定。" description="这里是整站实验入口：状态、证据、阻塞原因与下一步操作均来自对应模块，不能手动打勾。" />
-    <div className="guide-grid"><aside className="panel step-list">{guideSteps.map((item, index) => <button key={item.title} className={`${step === index ? "active" : ""} ${states[index].done ? "done" : ""}`} onClick={() => setStep(index)}><span>{states[index].done ? <Check size={16} /> : index + 1}</span><div><strong>{item.title}</strong><small>{states[index].done ? "自动完成" : index === firstIncomplete ? "当前阶段" : "待完成"}</small></div><ChevronRight size={16} /></button>)}</aside>
+    <div className="guide-grid"><aside className="panel step-list" aria-label="实验阶段目录">{guideSteps.map((item, index) => {
+      const status = states[index].done ? `已完成 · ${states[index].data}` : index === firstIncomplete ? `当前阶段 · ${states[index].data}` : "待完成 · 等待上一阶段满足条件";
+      return <button key={item.title} className={`${step === index ? "active" : ""} ${states[index].done ? "done" : ""}`} aria-pressed={step === index} onClick={() => setStep(index)}><span className="step-node">{states[index].done ? <Check size={16} /> : index + 1}</span><span className="step-summary"><strong>{item.title}</strong><small title={status}>{status}</small></span></button>;
+    })}</aside>
       <section className="panel guide-detail"><figure className="guide-visual"><Image key={current.image} src={current.image} alt={current.alt} fill priority={step === 0} sizes="(max-width: 1100px) 100vw, 50vw" style={{ objectPosition: current.position }} /><div className="guide-photo-shade" aria-hidden="true" /><span>STAGE {String(step + 1).padStart(2, "0")}</span><figcaption><span>真实实验照片</span><a href={current.source} target="_blank" rel="noreferrer">{current.credit}</a></figcaption></figure><div className="guide-copy"><p className="eyebrow">{state.done ? "阶段已自动完成" : "当前数据尚未满足条件"}</p><h2>{current.title}</h2><p>{current.detail}</p><div className="checkpoint"><ClipboardCheck size={19} /><div><strong>当前证据</strong><span>{state.data}</span></div></div>{!state.done && <p className="guide-block"><CircleAlert size={16} />阻塞原因：{state.reason}</p>}<div className="guide-actions"><button className="secondary-action" onClick={() => navigate("assistant")}><Bot size={16} />询问当前异常</button><button className="primary-action" onClick={() => navigate(current.target)}>{state.done ? "查看阶段数据" : "前往完成阶段"}<ArrowRight size={16} /></button></div></div></section>
       <aside className="panel guide-side"><div><Lightbulb size={20} /><strong>流程如何产生价值？</strong><p>预习、照片质量、自动认线、科学反演与云端报告共享同一状态；任何一步失败都会给出真实阻塞原因，不会产生貌似精确的最终数值。</p></div><div className="progress-block"><span>实验进度 <strong>{Math.round(completed / 5 * 100)}%</strong></span><Progress value={completed / 5 * 100} /><small>云端状态更新于 {journey.updatedAt ? formatChinaDateTime(journey.updatedAt) : "尚未保存"}</small></div></aside></div>
   </div>;
