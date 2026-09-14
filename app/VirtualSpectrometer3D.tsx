@@ -332,34 +332,43 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       addHorizontalTube(parent, radius, radius, length, position, meshMaterial);
       for (let index = -4; index <= 4; index++) addRing(parent, [position[0] + index * length / 10, position[1], position[2]], radius + .01, .013, sootBlack);
     };
-    const addCastTripodBase = (parent: THREE.Object3D) => {
-      // A single continuous three-lobed casting. The varying polar radius produces
-      // the broad rounded nose and smooth valleys of the physical spectrometer base.
+    const addCastUBase = (parent: THREE.Object3D) => {
+      // The supplied GLB is a continuous cast base with a low, broad U-shaped
+      // side profile. Build that profile directly instead of approximating it as
+      // three separate radial arms.
       const outline = new THREE.Shape();
-      const points = 144;
-      const tripodPhase = Math.PI / 6;
-      for (let index = 0; index <= points; index++) {
-        const angle = tripodPhase + index / points * Math.PI * 2;
-        const lobe = (1 + Math.cos(3 * (angle - tripodPhase))) / 2;
-        const radius = .9 + 1.15 * Math.pow(lobe, .54);
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
-        if (index === 0) outline.moveTo(x, z);
-        else outline.lineTo(x, z);
-      }
+      outline.moveTo(-2.12, -.9);
+      outline.bezierCurveTo(-2.27, -.74, -2.24, -.48, -2.06, -.36);
+      outline.bezierCurveTo(-1.88, -.24, -1.66, -.23, -1.39, -.27);
+      outline.bezierCurveTo(-.82, -.34, -.34, -.31, 0, -.23);
+      outline.bezierCurveTo(.34, -.31, .82, -.34, 1.39, -.27);
+      outline.bezierCurveTo(1.66, -.23, 1.88, -.24, 2.06, -.36);
+      outline.bezierCurveTo(2.24, -.48, 2.27, -.74, 2.12, -.9);
+      outline.bezierCurveTo(1.38, -.98, -.94, -.98, -2.12, -.9);
       outline.closePath();
+
+      // The shallow opening under the bridge gives the casting the recessed
+      // underside visible in the reference model while retaining wide end feet.
+      const underside = new THREE.Path();
+      underside.moveTo(-1.56, -.87);
+      underside.bezierCurveTo(-1.43, -.69, -.94, -.62, -.5, -.61);
+      underside.bezierCurveTo(-.18, -.59, .18, -.59, .5, -.61);
+      underside.bezierCurveTo(.94, -.62, 1.43, -.69, 1.56, -.87);
+      underside.bezierCurveTo(.9, -.83, -.9, -.83, -1.56, -.87);
+      underside.closePath();
+      outline.holes.push(underside);
+
       const geometry = new THREE.ExtrudeGeometry(outline, {
-        depth: .42,
+        depth: 1.52,
         bevelEnabled: true,
         bevelSegments: 7,
         bevelSize: .14,
         bevelThickness: .12,
-        curveSegments: 24,
+        curveSegments: 28,
       });
-      geometry.translate(0, 0, -.21);
-      const base = new THREE.Mesh(geometry, baseGray);
-      base.rotation.x = Math.PI / 2;
-      base.position.set(0, -.56, .03);
+      geometry.translate(0, 0, -.76);
+      const base = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: "#777a7e", metalness: .5, roughness: .48 }));
+      base.position.set(0, .09, .03);
       base.castShadow = true;
       base.receiveShadow = true;
       parent.add(base);
@@ -427,23 +436,17 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     };
     for (let degree = 0; degree < 360; degree += 10) addScaleNumber(degree);
 
-    // One-piece cast-aluminium tripod base, matching the physical instrument.
+    // One-piece cast-aluminium U base, proportioned from the supplied GLB scan.
     // It remains below the fixed main scale, so angle and ray geometry is unchanged.
-    // Two broad feet face the user, with the third behind the instrument, matching
-    // the characteristic U-shaped silhouette in the side reference photograph.
-    const baseLegAngles = [Math.PI / 6, Math.PI * 5 / 6, Math.PI * 3 / 2];
-    addCastTripodBase(instrument);
+    addCastUBase(instrument);
     addVerticalTube(instrument, .58, .7, .24, [0, -.4, .03], baseGray, 48);
     addVerticalTube(instrument, .53, .59, .1, [0, -.23, .03], railMetal, 48);
     addVerticalTube(instrument, .5, .56, .16, [0, -.05, .03], darkGray, 40);
     addVerticalTube(instrument, .31, .38, .72, [0, .34, .03], baseGray, 36);
     addVerticalTube(instrument, .58, .61, .13, [0, .76, .03], darkGray, 48);
     addVerticalTube(instrument, .5, .5, .06, [0, .855, .03], aluminum, 48);
-    for (const angle of baseLegAngles) {
-      const x = Math.cos(angle) * 1.78;
-      const z = .03 + Math.sin(angle) * 1.78;
-      addVerticalTube(instrument, .055, .07, .09, [x, -.89, z], carbon, 18);
-      addVerticalTube(instrument, .16, .14, .055, [x, -.952, z], matteBlack, 24);
+    for (const [x, z] of [[-1.78, -.48], [-1.78, .54], [1.78, -.48], [1.78, .54]] as Array<[number, number]>) {
+      addVerticalTube(instrument, .14, .13, .055, [x, -.92, z], matteBlack, 24);
     }
 
     const bench = new THREE.Group();
@@ -490,6 +493,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
 
     const collimator = new THREE.Group();
     instrument.add(collimator);
+    collimator.position.x = .12;
     const opticalAxisY = 1.47;
     addHorizontalTube(collimator, .33, .33, .42, [-3.32, opticalAxisY, .03], sootBlack);
     addRing(collimator, [-3.07, opticalAxisY, .03], .36, .035, carbon);
@@ -507,22 +511,25 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
 
     const telescopeGroup = new THREE.Group();
     instrument.add(telescopeGroup);
-    addBox(telescopeGroup, [3.55, .09, .17], [2.02, 1.17, .03], carbon);
-    addBox(telescopeGroup, [.29, .72, .34], [1.15, .91, .03], baseGray);
-    addBox(telescopeGroup, [1.08, .13, .48], [1.15, .6, .03], baseGray);
-    addHorizontalTube(telescopeGroup, .32, .3, .58, [.56, opticalAxisY, .03], sootBlack);
-    addRing(telescopeGroup, [.85, opticalAxisY, .03], .35, .035, darkGray);
-    addHorizontalTube(telescopeGroup, .26, .24, .66, [1.18, opticalAxisY, .03], carbon);
-    addKnurledSleeve(telescopeGroup, .32, .26, [1.55, opticalAxisY, .03], sootBlack);
-    addHorizontalTube(telescopeGroup, .22, .22, 1.62, [2.5, opticalAxisY, .03], aluminum);
-    addHorizontalTube(telescopeGroup, .12, .12, 1.55, [2.63, opticalAxisY + .2, .03], brightMetal, 24);
-    addRing(telescopeGroup, [1.82, opticalAxisY, .03], .25, .025, brightMetal);
-    addRing(telescopeGroup, [3.18, opticalAxisY, .03], .25, .026, railMetal);
-    addHorizontalTube(telescopeGroup, .23, .3, .42, [3.53, opticalAxisY, .03], carbon);
-    addKnurledSleeve(telescopeGroup, .34, .32, [3.88, opticalAxisY, .03], sootBlack);
-    addHorizontalTube(telescopeGroup, .24, .38, .2, [4.13, opticalAxisY, .03], matteBlack);
-    addVerticalTube(telescopeGroup, .095, .12, .64, [3.76, 1.12, .03], sootBlack, 18);
-    addRing(telescopeGroup, [3.76, 1.4, .03], .115, .02, carbon);
+    const telescopeBody = new THREE.Group();
+    telescopeBody.position.x = -.16;
+    telescopeGroup.add(telescopeBody);
+    addBox(telescopeBody, [3.55, .09, .17], [2.02, 1.17, .03], carbon);
+    addBox(telescopeBody, [.29, .72, .34], [1.15, .91, .03], baseGray);
+    addBox(telescopeBody, [1.08, .13, .48], [1.15, .6, .03], baseGray);
+    addHorizontalTube(telescopeBody, .32, .3, .58, [.56, opticalAxisY, .03], sootBlack);
+    addRing(telescopeBody, [.85, opticalAxisY, .03], .35, .035, darkGray);
+    addHorizontalTube(telescopeBody, .26, .24, .66, [1.18, opticalAxisY, .03], carbon);
+    addKnurledSleeve(telescopeBody, .32, .26, [1.55, opticalAxisY, .03], sootBlack);
+    addHorizontalTube(telescopeBody, .22, .22, 1.62, [2.5, opticalAxisY, .03], aluminum);
+    addHorizontalTube(telescopeBody, .12, .12, 1.55, [2.63, opticalAxisY + .2, .03], brightMetal, 24);
+    addRing(telescopeBody, [1.82, opticalAxisY, .03], .25, .025, brightMetal);
+    addRing(telescopeBody, [3.18, opticalAxisY, .03], .25, .026, railMetal);
+    addHorizontalTube(telescopeBody, .23, .3, .42, [3.53, opticalAxisY, .03], carbon);
+    addKnurledSleeve(telescopeBody, .34, .32, [3.88, opticalAxisY, .03], sootBlack);
+    addHorizontalTube(telescopeBody, .24, .38, .2, [4.13, opticalAxisY, .03], matteBlack);
+    addVerticalTube(telescopeBody, .095, .12, .64, [3.76, 1.12, .03], sootBlack, 18);
+    addRing(telescopeBody, [3.76, 1.4, .03], .115, .02, carbon);
 
     const vernierPlateMaterial = new THREE.MeshStandardMaterial({
       color: "#efead8", metalness: .16, roughness: .55, transparent: true, opacity: .88, side: THREE.DoubleSide,
