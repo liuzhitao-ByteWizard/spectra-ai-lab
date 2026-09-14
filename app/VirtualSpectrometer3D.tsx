@@ -264,6 +264,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const carbon = material("#202226", .64, .31);
     const darkGray = material("#3b3d42", .72, .3);
     const baseGray = material("#74777c", .68, .34);
+    const castAluminum = material("#777a7e", .5, .48);
     const aluminum = material("#b6b9bd", .84, .2);
     const brightMetal = material("#d1d3d6", .9, .16);
     const railMetal = material("#9da0a4", .72, .31);
@@ -332,47 +333,35 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       addHorizontalTube(parent, radius, radius, length, position, meshMaterial);
       for (let index = -4; index <= 4; index++) addRing(parent, [position[0] + index * length / 10, position[1], position[2]], radius + .01, .013, sootBlack);
     };
-    const addCastUBase = (parent: THREE.Object3D) => {
-      // The supplied GLB is a continuous cast base with a low, broad U-shaped
-      // side profile. Build that profile directly instead of approximating it as
-      // three separate radial arms.
+    const addCastBaseArm = (parent: THREE.Object3D, angle: number) => {
+      // Each leg is an individual cast arm: narrow beside the centre hub, then
+      // broadening into the rounded foot seen in the three reference photos.
       const outline = new THREE.Shape();
-      outline.moveTo(-2.12, -.9);
-      outline.bezierCurveTo(-2.27, -.74, -2.24, -.48, -2.06, -.36);
-      outline.bezierCurveTo(-1.88, -.24, -1.66, -.23, -1.39, -.27);
-      outline.bezierCurveTo(-.82, -.34, -.34, -.31, 0, -.23);
-      outline.bezierCurveTo(.34, -.31, .82, -.34, 1.39, -.27);
-      outline.bezierCurveTo(1.66, -.23, 1.88, -.24, 2.06, -.36);
-      outline.bezierCurveTo(2.24, -.48, 2.27, -.74, 2.12, -.9);
-      outline.bezierCurveTo(1.38, -.98, -.94, -.98, -2.12, -.9);
+      outline.moveTo(.34, -.3);
+      outline.bezierCurveTo(.76, -.38, 1.08, -.34, 1.48, -.39);
+      outline.bezierCurveTo(1.82, -.48, 2.13, -.29, 2.17, 0);
+      outline.bezierCurveTo(2.13, .29, 1.82, .48, 1.48, .39);
+      outline.bezierCurveTo(1.08, .34, .76, .38, .34, .3);
       outline.closePath();
-
-      // The shallow opening under the bridge gives the casting the recessed
-      // underside visible in the reference model while retaining wide end feet.
-      const underside = new THREE.Path();
-      underside.moveTo(-1.56, -.87);
-      underside.bezierCurveTo(-1.43, -.69, -.94, -.62, -.5, -.61);
-      underside.bezierCurveTo(-.18, -.59, .18, -.59, .5, -.61);
-      underside.bezierCurveTo(.94, -.62, 1.43, -.69, 1.56, -.87);
-      underside.bezierCurveTo(.9, -.83, -.9, -.83, -1.56, -.87);
-      underside.closePath();
-      outline.holes.push(underside);
-
       const geometry = new THREE.ExtrudeGeometry(outline, {
-        depth: 1.52,
+        depth: .32,
         bevelEnabled: true,
-        bevelSegments: 7,
-        bevelSize: .14,
-        bevelThickness: .12,
-        curveSegments: 28,
+        bevelSegments: 5,
+        bevelSize: .09,
+        bevelThickness: .075,
+        curveSegments: 20,
       });
-      geometry.translate(0, 0, -.76);
-      const base = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: "#777a7e", metalness: .5, roughness: .48 }));
-      base.position.set(0, .09, .03);
-      base.castShadow = true;
-      base.receiveShadow = true;
-      parent.add(base);
-      return base;
+      geometry.translate(0, 0, -.16);
+      const pivot = new THREE.Group();
+      pivot.rotation.y = angle;
+      parent.add(pivot);
+      const arm = new THREE.Mesh(geometry, castAluminum);
+      arm.rotation.x = Math.PI / 2;
+      arm.position.set(0, -.65, .03);
+      arm.castShadow = true;
+      arm.receiveShadow = true;
+      pivot.add(arm);
+      return arm;
     };
 
     const whiteBase = addBox(scene, [12.4, .14, 5.8], [0, -.98, 0], groundMaterial);
@@ -436,17 +425,20 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     };
     for (let degree = 0; degree < 360; degree += 10) addScaleNumber(degree);
 
-    // One-piece cast-aluminium U base, proportioned from the supplied GLB scan.
-    // It remains below the fixed main scale, so angle and ray geometry is unchanged.
-    addCastUBase(instrument);
+    // Three separate radial cast arms: one forward arm and two rear arms, matching
+    // the actual instrument rather than a continuous U-shaped pedestal.
+    const baseLegAngles = [-Math.PI / 2, Math.PI / 6, Math.PI * 5 / 6];
+    baseLegAngles.forEach((angle) => addCastBaseArm(instrument, angle));
     addVerticalTube(instrument, .58, .7, .24, [0, -.4, .03], baseGray, 48);
     addVerticalTube(instrument, .53, .59, .1, [0, -.23, .03], railMetal, 48);
     addVerticalTube(instrument, .5, .56, .16, [0, -.05, .03], darkGray, 40);
     addVerticalTube(instrument, .31, .38, .72, [0, .34, .03], baseGray, 36);
     addVerticalTube(instrument, .58, .61, .13, [0, .76, .03], darkGray, 48);
     addVerticalTube(instrument, .5, .5, .06, [0, .855, .03], aluminum, 48);
-    for (const [x, z] of [[-1.78, -.48], [-1.78, .54], [1.78, -.48], [1.78, .54]] as Array<[number, number]>) {
-      addVerticalTube(instrument, .14, .13, .055, [x, -.92, z], matteBlack, 24);
+    for (const angle of baseLegAngles) {
+      const x = Math.cos(angle) * 1.9;
+      const z = .03 - Math.sin(angle) * 1.9;
+      addVerticalTube(instrument, .16, .14, .06, [x, -.92, z], matteBlack, 24);
     }
 
     const bench = new THREE.Group();
