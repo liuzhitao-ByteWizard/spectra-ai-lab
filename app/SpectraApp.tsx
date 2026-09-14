@@ -16,7 +16,7 @@ import { Progress } from "@/components/ui/progress";
 import AssistantAnswer from "./AssistantAnswer";
 import AuroraField from "./AuroraField";
 import {
-  fitGratingFromPixels,
+  measureGrating,
   SPECTRAL_LIBRARY,
 } from "@/lib/spectrometer";
 import {
@@ -56,8 +56,30 @@ const analysisPipeline = [
   { title: "图像校正", detail: "倾斜 0.7°", icon: SlidersHorizontal },
   { title: "峰值检测", detail: "自适应条数", icon: Waves },
   { title: "谱线匹配", detail: "Hg-I · 97.6%", icon: Target },
-  { title: "参数反演", detail: "d = 3.331 μm", icon: BarChart3 },
+  { title: "游标反演", detail: "未知 d", icon: BarChart3 },
 ];
+
+const degreesFromReading = (value: string) => {
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) && Math.abs(parsed) <= 360 ? parsed : null;
+};
+
+const circularAngleDifferenceDeg = (readingDeg: number, zeroDeg: number) => {
+  const signedDifference = ((readingDeg - zeroDeg + 540) % 360) - 180;
+  return Math.abs(signedDifference);
+};
+
+const lineReadingKey = (wavelengthNm: number) => wavelengthNm.toFixed(2);
+
+function sampleVernierReadings(zeroReadingDeg = 120) {
+  // The demonstration mirrors a 1′ vernier; it must not present a synthetic
+  // zero-residual result as if it were an experimental measurement.
+  const leastCountDeg = 1 / 60;
+  return Object.fromEntries(SPECTRAL_LIBRARY.mercury.map((line) => {
+    const theta = Math.asin(line.wavelengthNm / 3333.333) * 180 / Math.PI;
+    return [lineReadingKey(line.wavelengthNm), (zeroReadingDeg + Math.round(theta / leastCountDeg) * leastCountDeg).toFixed(4)];
+  }));
+}
 
 function classifyColor(r: number, g: number, b: number) {
   const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
@@ -167,28 +189,6 @@ function detectSpectrumPeaks(source: SpectrumSource, options: DetectorOptions): 
   return { ...source, smoothIntensity: smooth, peaks };
 }
 
-function detectZeroOrder(source: SpectrumSource, spectralPeaks: Peak[]) {
-  if (!spectralPeaks.length) return null;
-  const firstSpectrumX = Math.min(...spectralPeaks.map((peak) => peak.x));
-  const smooth = smoothIntensity(source.luminanceIntensity, 2);
-  const end = Math.max(4, Math.floor(firstSpectrumX - Math.max(8, source.width * .012)));
-  let bestX = -1, bestProminence = 0;
-  for (let x = 3; x < end - 3; x++) {
-    if (smooth[x] <= smooth[x - 1] || smooth[x] < smooth[x + 1]) continue;
-    const radius = Math.max(8, Math.round(source.width * .018));
-    const left = smooth.slice(Math.max(0, x - radius), x);
-    const right = smooth.slice(x + 1, Math.min(end, x + radius + 1));
-    if (!left.length || !right.length) continue;
-    const prominence = smooth[x] - Math.max(Math.min(...left), Math.min(...right));
-    if (prominence > bestProminence) { bestProminence = prominence; bestX = x; }
-  }
-  if (bestX < 0 || bestProminence < .018) return null;
-  const y1 = smooth[bestX - 1], y2 = smooth[bestX], y3 = smooth[bestX + 1];
-  const denominator = y1 - 2 * y2 + y3;
-  const offset = Math.abs(denominator) > 1e-9 ? Math.max(-.5, Math.min(.5, .5 * (y1 - y3) / denominator)) : 0;
-  return { x: bestX + offset, uncertaintyPx: Math.max(.25, Math.min(1.5, .12 / Math.max(bestProminence, .01))), prominence: bestProminence };
-}
-
 function autoMatchMercuryPeaks(image: ImageAnalysis): ReferenceMarker[] {
   if (image.peaks.length < 2) return [];
   const peaks = [...image.peaks].sort((a, b) => a.x - b.x).slice(0, 16);
@@ -241,32 +241,6 @@ function autoMatchMercuryPeaks(image: ImageAnalysis): ReferenceMarker[] {
   return winner ? winner.markers.sort((a, b) => a.xRatio - b.xRatio) : [];
 }
 
-function inferZeroFromMercuryLines(markers: ReferenceMarker[], imageWidth: number) {
-  if (markers.length < 3) return null;
-  const dNm = 3333.333;
-  const rows = markers.map((marker) => ({
-    x: marker.xRatio * imageWidth,
-    t: Math.tan(Math.asin(marker.wavelengthNm / dNm)),
-  }));
-  const meanX = rows.reduce((sum, row) => sum + row.x, 0) / rows.length;
-  const meanT = rows.reduce((sum, row) => sum + row.t, 0) / rows.length;
-  const denominator = rows.reduce((sum, row) => sum + (row.t - meanT) ** 2, 0);
-  if (denominator <= 0) return null;
-  const L = rows.reduce((sum, row) => sum + (row.t - meanT) * (row.x - meanX), 0) / denominator;
-  const x = meanX - L * meanT;
-  const residuals = rows.map((row) => row.x - (x + L * row.t));
-  const rmsePx = Math.sqrt(residuals.reduce((sum, value) => sum + value ** 2, 0) / rows.length);
-  if (!Number.isFinite(x) || !Number.isFinite(L) || Math.abs(L) < imageWidth || rmsePx > Math.max(5, imageWidth * .012)) return null;
-  return { x, uncertaintyPx: Math.max(.5, rmsePx), prominence: 0, inferred: true, L };
-}
-
-function applyMercuryFiveLineModel(image: ImageAnalysis) {
-  // Reference matching must not mutate the detector output. Unknown lines and
-  // rejected artefacts remain visible for review instead of being forced into
-  // a fixed five-peak result.
-  return image;
-}
-
 function buildSampleSource(): SpectrumSource {
   const width = 1000, height = 560;
   const positions = SPECTRAL_LIBRARY.mercury.map((line) => Math.round(100 + 4000 * Math.tan(Math.asin(line.wavelengthNm / 3333))));
@@ -281,7 +255,7 @@ function buildSampleSource(): SpectrumSource {
     const hex = SPECTRAL_LIBRARY.mercury[index].color;
     red[position] = Number.parseInt(hex.slice(1, 3), 16); green[position] = Number.parseInt(hex.slice(3, 5), 16); blue[position] = Number.parseInt(hex.slice(5, 7), 16);
   });
-  return { preview: null, fileName: "零级与单侧一级汞谱示例", width, height, rawIntensity, luminanceIntensity, chromaIntensity, red, green, blue, overexposed: false, sharpnessOk: true, tilt: .7, bandWidth: width, sample: true };
+  return { preview: null, fileName: "一级单侧汞谱示例", width, height, rawIntensity, luminanceIntensity, chromaIntensity, red, green, blue, overexposed: false, sharpnessOk: true, tilt: .7, bandWidth: width, sample: true };
 }
 
 async function analyzeImageFile(file: File): Promise<SpectrumSource> {
@@ -336,7 +310,7 @@ function AppHeader({ active, onChange, authenticated, authHref, authLabel, viewe
         {navItems.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onChange(item.id)}>{item.label}</button>)}
       </nav>
       <div className="topbar-actions">
-        <button className="ghost-button" onClick={() => toast.info("主流程：虚拟预习 → 采集质检 → 零级与汞线匹配 → d 与不确定度 → 云端复盘")}><CircleHelp size={17} /> 流程帮助</button>
+        <button className="ghost-button" onClick={() => toast.info("主流程：虚拟预习 → 零级参考图与 φ₀ → 一级单侧认线与 φᵢ → d 与不确定度 → 云端复盘")}><CircleHelp size={17} /> 流程帮助</button>
         {authHref ? <a className="auth-link" href={authHref} target="_top" title={viewerName ?? authLabel}>{authenticated ? <LogOut size={16} /> : <LogIn size={16} />}{authLabel}</a> : authenticated ? <span className="auth-link" title={viewerName ?? authLabel}><CheckCircle2 size={16} />{authLabel}</span> : null}
       </div>
     </header>
@@ -487,7 +461,7 @@ function AssistantModule({ journey, navigate, authenticated, authHref }: { journ
     if (!authenticated) return toast.info("登录后即可使用 AI 助教");
     const value = (preset ?? question).trim(); if (!value || sending) return;
     setMessages((items) => [...items, { role: "user", text: value }]); setQuestion(""); setSending(true);
-    const context = `当前实验状态：预习${journey.prelab.capturedLines >= 2 ? "已完成" : "未完成"}；照片${journey.capture.imageCount}张，曝光${journey.capture.exposureOk ? "通过" : "未通过"}，清晰度${journey.capture.sharpnessOk ? "通过" : "未通过"}；零级${journey.capture.zeroX ?? "未找到"}；匹配参考线${journey.identification.matchedLines}条；反演${journey.inversion.reportable ? "可报告" : `被阻塞：${journey.inversion.blockReason}` }。助教只能解释，不能更改完成状态。`;
+    const context = `当前实验状态：预习${journey.prelab.capturedLines >= 2 ? "已完成" : "未完成"}；照片${journey.capture.imageCount}张，曝光${journey.capture.exposureOk ? "通过" : "未通过"}，清晰度${journey.capture.sharpnessOk ? "通过" : "未通过"}；零级参考${journey.capture.zeroReferenceCaptured ? "已上传" : "未上传"}，φ₀${journey.capture.zeroReadingDeg ?? "未填写"}°；匹配参考线${journey.identification.matchedLines}条；反演${journey.inversion.reportable ? "可报告" : `被阻塞：${journey.inversion.blockReason}` }。助教只能解释，不能更改完成状态。`;
     try { const response = await fetch("/api/ai/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: `${context}\n\n学生问题：${value}` }) }); const data = await response.json() as { answer?: string; sources?: string[]; error?: string }; if (!response.ok || !data.answer) throw new Error(data.error || "AI 助教暂时不可用"); setMessages((items) => [...items, { role: "assistant", text: data.answer!, source: data.sources?.[0] }]); }
     catch (error) { setMessages((items) => [...items, { role: "assistant", text: error instanceof Error ? error.message : "AI 助教暂时不可用，请稍后重试。", source: "系统提示" }]); }
     finally { setSending(false); }
@@ -525,7 +499,7 @@ function MarkerPicker({ selected, setSelected, markers, onClear, onRemove, image
     <div className="marker-picker-head"><label>选择要标记的汞灯谱线<select value={selected} onChange={(event) => setSelected(Number(event.target.value))}>{SPECTRAL_LIBRARY.mercury.map((line) => <option value={line.wavelengthNm} key={line.wavelengthNm}>{line.wavelengthNm.toFixed(2)} nm · {line.family}</option>)}</select></label><button onClick={onClear} disabled={!markers.length}>清空</button></div>
     <p>候选谱线数量不限；系统匹配其中可确认的汞灯参考线，其余谱线与干扰峰保留供复核。</p>
     {image && <div className="candidate-strip" aria-label="检测到的候选峰">{image.peaks.map((peak, index) => <button key={`${peak.x}-${index}`} onClick={() => onCandidate(peak.xRatio)}><i style={{ background: peak.color }} />峰 {index + 1}<small>{peak.x.toFixed(1)}px</small></button>)}</div>}
-    <div className="selected-markers">{markers.length ? markers.map((marker) => <button key={marker.wavelengthNm} onClick={() => onRemove(marker.wavelengthNm)} title="移除此标记"><i style={{ background: lineColor(marker.wavelengthNm) }} />{marker.wavelengthNm.toFixed(2)} nm<span>×</span></button>) : <span>尚未选择参考线；画内有零级至少标记 2 条，画外零级校准至少标记 4 条。</span>}</div>
+    <div className="selected-markers">{markers.length ? markers.map((marker) => <button key={marker.wavelengthNm} onClick={() => onRemove(marker.wavelengthNm)} title="移除此标记"><i style={{ background: lineColor(marker.wavelengthNm) }} />{marker.wavelengthNm.toFixed(2)} nm<span>×</span></button>) : <span>尚未选择参考线；先确认至少一条，再填写它对应的游标读数。两条及以上可进行残差复核。</span>}</div>
   </div>;
 }
 
@@ -541,9 +515,9 @@ function ProcessingTimeline({ image, selectedCount, resultText }: { image: Image
     { icon: Upload, title: "图像读取", detail: image ? `${image.width} × ${image.height}px · ${image.fileName}` : "等待上传原始照片" },
     { icon: SlidersHorizontal, title: "强度提取", detail: image ? `中央 60% 谱带 · 倾斜校正 ${image.tilt.toFixed(1)}°` : "生成横向亮度剖面" },
     { icon: Waves, title: "峰值检测", detail: image ? `${image.peaks.length} 个有效峰 · ${image.overexposed ? "高光偏多" : "曝光正常"}` : "色彩对比、峰宽与邻峰联合筛选" },
-    { icon: BarChart3, title: "物理计算", detail: selectedCount >= 3 ? resultText : `${selectedCount}/3 条参考线已标记` },
+    { icon: BarChart3, title: "物理计算", detail: selectedCount >= 2 ? resultText : selectedCount === 1 ? "已得到单线暂估，待另一条游标读数复核" : "填写至少一条谱线的游标读数" },
   ];
-  return <div className="processing-timeline">{steps.map((item, index) => { const Icon = item.icon; return <div key={item.title} className={image && (index < 3 || selectedCount >= 3) ? "complete" : ""}><span><Icon size={18} /></span><small>0{index + 1}</small><strong>{item.title}</strong><p>{item.detail}</p></div>; })}</div>;
+  return <div className="processing-timeline">{steps.map((item, index) => { const Icon = item.icon; return <div key={item.title} className={image && (index < 3 || selectedCount >= 2) ? "complete" : ""}><span><Icon size={18} /></span><small>0{index + 1}</small><strong>{item.title}</strong><p>{item.detail}</p></div>; })}</div>;
 }
 
 type SyncPhase = "loading" | "idle" | "pending" | "saving" | "retrying" | "synced" | "error";
@@ -565,9 +539,9 @@ function snapshotFromRecord(record: SavedRecord): RecordSnapshot {
 
 async function sourceFromSyncedImage(url: string) {
   const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) throw new Error("原始光谱图片读取失败");
+  if (!response.ok) throw new Error("原始实验图片读取失败");
   const blob = await response.blob();
-  return analyzeImageFile(new File([blob], "已同步原始光谱", { type: blob.type || "image/png" }));
+  return analyzeImageFile(new File([blob], "已同步实验图片", { type: blob.type || "image/png" }));
 }
 
 function useExperimentSync({
@@ -784,43 +758,63 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
   const [aSource, setASource] = useState<SpectrumSource | null>(() => analyzeSignal > 0 ? buildSampleSource() : null);
   const [aMarkers, setAMarkers] = useState<ReferenceMarker[]>(() => analyzeSignal > 0 ? SPECTRAL_LIBRARY.mercury.map((line) => ({ wavelengthNm: line.wavelengthNm, xRatio: (100 + 4000 * Math.tan(Math.asin(line.wavelengthNm / 3333))) / 1000 })) : []);
   const [selectedWavelength, setSelectedWavelength] = useState(546.07);
-  const [zeroX, setZeroX] = useState(100);
-  const [scaleL, setScaleL] = useState(4000);
+  const [zeroSource, setZeroSource] = useState<SpectrumSource | null>(() => analyzeSignal > 0 ? { ...buildSampleSource(), fileName: "零级参考示例" } : null);
+  const [zeroReading, setZeroReading] = useState(analyzeSignal > 0 ? "120.0000" : "");
+  const [lineReadings, setLineReadings] = useState<Record<string, string>>(() => analyzeSignal > 0 ? sampleVernierReadings() : {});
+  const [vernierResolutionArcmin, setVernierResolutionArcmin] = useState(1);
   const [aComplete, setAComplete] = useState(analyzeSignal > 0);
   const [busy, setBusy] = useState(false);
   const [diagnosis, setDiagnosis] = useState("");
-  const [repeatSources, setRepeatSources] = useState<SpectrumSource[]>([]);
   const pendingImagesRef = useRef<PendingImages>({ A: {} });
 
-  const aImage = useMemo(() => aSource ? applyMercuryFiveLineModel(detectSpectrumPeaks(aSource, detector)) : null, [aSource, detector]);
-  const directZeroDetection = useMemo(() => aImage ? detectZeroOrder(aImage, aImage.peaks) : null, [aImage]);
-  const inferredZeroDetection = useMemo(() => aImage && !directZeroDetection ? inferZeroFromMercuryLines(aMarkers, aImage.width) : null, [aImage, aMarkers, directZeroDetection]);
-  const zeroDetection = directZeroDetection ?? inferredZeroDetection;
-  const effectiveZeroX = zeroDetection?.x ?? zeroX;
+  const aImage = useMemo(() => aSource ? detectSpectrumPeaks(aSource, detector) : null, [aSource, detector]);
+  const zeroReadingDeg = degreesFromReading(zeroReading);
+  const usableReadings = useMemo(() => {
+    if (zeroReadingDeg === null) return [];
+    return aMarkers.flatMap((marker) => {
+      const readingDeg = degreesFromReading(lineReadings[lineReadingKey(marker.wavelengthNm)] ?? "");
+      if (readingDeg === null) return [];
+      const thetaDeg = circularAngleDifferenceDeg(readingDeg, zeroReadingDeg);
+      return thetaDeg > .005 && thetaDeg < 89.995 ? [{ wavelengthNm: marker.wavelengthNm, thetaDeg, readingDeg }] : [];
+    });
+  }, [aMarkers, lineReadings, zeroReadingDeg]);
+  const singleLineEstimate = useMemo(() => {
+    const line = usableReadings[0];
+    return line ? line.wavelengthNm / Math.sin(line.thetaDeg * Math.PI / 180) / 1000 : null;
+  }, [usableReadings]);
 
   useEffect(() => () => { if (aSource?.preview) URL.revokeObjectURL(aSource.preview); }, [aSource?.preview]);
+  useEffect(() => () => { if (zeroSource?.preview) URL.revokeObjectURL(zeroSource.preview); }, [zeroSource?.preview]);
 
   const loadSample = () => {
     sync.resetSync();
-    const sample = buildSampleSource(); const positions = SPECTRAL_LIBRARY.mercury.map((line) => ({ wavelengthNm: line.wavelengthNm, xRatio: (100 + 4000 * Math.tan(Math.asin(line.wavelengthNm / 3333))) / sample.width }));
-    setASource(sample); setRepeatSources([]); setAMarkers(positions); setZeroX(100); setScaleL(4000); setAComplete(true); setSelectedWavelength(546.07);
+    const sample = buildSampleSource();
+    const positions = SPECTRAL_LIBRARY.mercury.map((line) => ({ wavelengthNm: line.wavelengthNm, xRatio: (100 + 4000 * Math.tan(Math.asin(line.wavelengthNm / 3333))) / sample.width }));
+    setZeroSource({ ...buildSampleSource(), fileName: "零级参考示例" }); setZeroReading("120.0000");
+    setASource(sample); setAMarkers(positions); setLineReadings(sampleVernierReadings()); setVernierResolutionArcmin(1); setAComplete(true); setSelectedWavelength(546.07);
   };
-  const upload = async (files?: FileList | File[]) => {
-    const selectedFiles = files ? Array.from(files).slice(0, 3) : [];
-    if (!selectedFiles.length) return; setBusy(true);
+  const uploadZeroReference = async (files?: FileList | File[]) => {
+    const file = files ? Array.from(files)[0] : null;
+    if (!file) return; setBusy(true);
     try {
-      const sources = await Promise.all(selectedFiles.map(analyzeImageFile));
-      const source = sources[0];
-      const detected = detectSpectrumPeaks(source, detector);
-      const analyzed = applyMercuryFiveLineModel(detected);
+      const source = await analyzeImageFile(file);
+      pendingImagesRef.current.A.zero_reference = file;
+      setZeroSource(source); setAComplete(false);
+      toast.success(source.overexposed || !source.sharpnessOk ? "零级参考图已上传，请检查曝光和清晰度" : "零级参考图已上传，请填写 φ₀ 游标读数");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "图像分析失败"); }
+    finally { setBusy(false); }
+  };
+  const uploadSpectrum = async (files?: FileList | File[]) => {
+    const file = files ? Array.from(files)[0] : null;
+    if (!file) return; setBusy(true);
+    try {
+      const source = await analyzeImageFile(file);
+      const analyzed = detectSpectrumPeaks(source, detector);
       const automaticMarkers = autoMatchMercuryPeaks(analyzed);
-      pendingImagesRef.current.A.primary = selectedFiles[0];
-      if (selectedFiles[1]) pendingImagesRef.current.A.repeat_2 = selectedFiles[1];
-      if (selectedFiles[2]) pendingImagesRef.current.A.repeat_3 = selectedFiles[2];
-      setASource(source); setRepeatSources(sources.slice(1)); setAMarkers(automaticMarkers); setAComplete(false);
-      const zero = detectZeroOrder(analyzed, analyzed.peaks);
-      if (zero) setZeroX(zero.x);
-      toast.success(automaticMarkers.length >= (zero ? 2 : 3) ? `已识别候选谱线并匹配 ${automaticMarkers.length} 条参考线` : "图像读取完成，请补充或修正参考线标记");
+      pendingImagesRef.current.A.primary = file;
+      setASource(source); setAMarkers(automaticMarkers); setAComplete(false);
+      setLineReadings((current) => Object.fromEntries(automaticMarkers.map((marker) => [lineReadingKey(marker.wavelengthNm), current[lineReadingKey(marker.wavelengthNm)] ?? ""])));
+      toast.success(automaticMarkers.length >= 2 ? `已识别候选谱线并匹配 ${automaticMarkers.length} 条参考线` : "图像读取完成，请补充或修正参考线标记");
     } catch (error) { toast.error(error instanceof Error ? error.message : "图像分析失败"); }
     finally { setBusy(false); }
   };
@@ -832,60 +826,75 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
     const xRatio = nearest && Math.abs(nearest.x - clickedX) <= detector.minDistancePx ? nearest.xRatio : ratio;
     const update = (items: ReferenceMarker[]) => [...items.filter((item) => item.wavelengthNm !== selectedWavelength), { wavelengthNm: selectedWavelength, xRatio }].sort((a, b) => a.xRatio - b.xRatio);
     setAMarkers(update);
+    setAComplete(false);
   };
-  const removeMarker = (wavelengthNm: number) => setAMarkers((items) => items.filter((item) => item.wavelengthNm !== wavelengthNm));
-
-  const repeatDValues = useMemo(() => repeatSources.flatMap((source) => {
-    const image = applyMercuryFiveLineModel(detectSpectrumPeaks(source, detector));
-    const markers = autoMatchMercuryPeaks(image);
-    const directZero = detectZeroOrder(image, image.peaks);
-    const zero = directZero ?? inferZeroFromMercuryLines(markers, image.width);
-    const minimumReferences = directZero ? 2 : 4;
-    if (!zero || markers.length < minimumReferences || image.overexposed || !image.sharpnessOk) return [];
-    try {
-      const result = fitGratingFromPixels(markers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * image.width, uncertaintyPx: .35 })), zero.x, image.width, { zeroUncertaintyPx: zero.uncertaintyPx, wavelengthUncertaintyNm: .01, referenceCalibration: !directZero });
-      return result.reportable ? [result.dUm] : [];
-    } catch { return []; }
-  }), [repeatSources, detector]);
+  const removeMarker = (wavelengthNm: number) => {
+    setAMarkers((items) => items.filter((item) => item.wavelengthNm !== wavelengthNm));
+    setLineReadings((current) => { const next = { ...current }; delete next[lineReadingKey(wavelengthNm)]; return next; });
+    setAComplete(false);
+  };
 
   const aResult = useMemo(() => {
-    const minimumReferences = directZeroDetection ? 2 : 4;
-    if (!aComplete || !aImage || aMarkers.length < minimumReferences) return null;
+    if (!aComplete || !aImage || zeroReadingDeg === null || usableReadings.length < 2) return null;
     try {
-      const provisional = fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), effectiveZeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01, referenceCalibration: !directZeroDetection });
-      return fitGratingFromPixels(aMarkers.map((marker) => ({ wavelengthNm: marker.wavelengthNm, x: marker.xRatio * aImage.width, uncertaintyPx: .35 })), effectiveZeroX, aImage.width, { zeroUncertaintyPx: zeroDetection?.uncertaintyPx ?? .5, wavelengthUncertaintyNm: .01, repeatDValuesUm: [provisional.dUm, ...repeatDValues], referenceCalibration: !directZeroDetection });
+      const measurement = measureGrating(usableReadings.map(({ wavelengthNm, thetaDeg }) => ({ wavelengthNm, thetaDeg })), .01, vernierResolutionArcmin * Math.SQRT2);
+      const maxResidualNm = Math.max(...measurement.points.map((point) => Math.abs(point.residualNm)));
+      const residualTargetMet = maxResidualNm <= 1;
+      const standardUncertaintyUm = measurement.uncertaintyUm / 2;
+      return {
+        ...measurement,
+        standardUncertaintyUm,
+        expandedUncertaintyUm: measurement.uncertaintyUm,
+        coverageFactor: 2,
+        uncertaintyLabel: "游标读数扩展不确定度",
+        uncertaintyBudget: [
+          { key: "vernier", label: "零级与一级游标读数（合成）", standardUncertaintyUm, status: `φ₀ 与 ${usableReadings.length} 条 φᵢ · 分度 ${vernierResolutionArcmin.toFixed(2)}′` },
+          { key: "wavelength", label: "汞灯参考波长（uλ=0.01 nm）", standardUncertaintyUm: null, status: "已纳入物理模型" },
+          { key: "repeatability", label: "重复测量", standardUncertaintyUm: null, status: "本次未评定" },
+        ],
+        reportable: residualTargetMet && Number.isFinite(standardUncertaintyUm),
+        blockReason: residualTargetMet ? "" : `逐线波长残差最大 ${maxResidualNm.toFixed(3)} nm，超过 1 nm，请复核对应游标读数或谱线标记`,
+        identifiability: {
+          correlation: 0,
+          profileLowUm: Math.max(0, measurement.dUm - measurement.uncertaintyUm),
+          profileHighUm: measurement.dUm + measurement.uncertaintyUm,
+          boundaryHit: false,
+        },
+        zeroReadingDeg,
+        lineReadingCount: usableReadings.length,
+        maxResidualNm,
+      };
     } catch { return null; }
-  }, [aComplete, aImage, aMarkers, effectiveZeroX, zeroDetection, directZeroDetection, repeatDValues]);
+  }, [aComplete, aImage, zeroReadingDeg, usableReadings, vernierResolutionArcmin]);
 
   const yellowDoubletResolved = aMarkers.some((item) => item.wavelengthNm === 576.96) && aMarkers.some((item) => item.wavelengthNm === 579.07) && (() => { const yellow = aMarkers.filter((item) => item.wavelengthNm >= 576); return yellow.length === 2 && Math.abs(yellow[1].xRatio - yellow[0].xRatio) * (aImage?.width ?? 0) >= 1.5; })();
-  const repeatsValid = repeatSources.length === repeatDValues.length;
-  const minimumReferences = directZeroDetection ? 2 : 4;
-  const hasResult = Boolean(aResult?.reportable && aMarkers.length >= minimumReferences && zeroDetection && aImage?.sharpnessOk && !aImage.overexposed && repeatsValid);
-  const blockReason = !aImage ? "等待上传光谱照片" : aImage.overexposed ? "照片过曝，请降低曝光后重拍" : !aImage.sharpnessOk ? "谱线不够清晰，请重新对焦后拍摄" : aMarkers.length < minimumReferences ? `当前几何条件至少需要 ${minimumReferences} 条可靠参考线` : !zeroDetection ? "无法由已匹配参考线确定画外零级，请继续标记" : !repeatsValid ? "至少一张重复照片未通过认线或质量检查" : aResult && !aResult.reportable ? aResult.blockReason : "";
-  const status = !aImage ? "待上传" : hasResult ? "已完成" : blockReason ? "被阻塞" : "可计算";
+  const hasResult = Boolean(aResult?.reportable && zeroSource && aImage?.sharpnessOk && !aImage.overexposed && zeroReadingDeg !== null);
+  const blockReason = !zeroSource ? "请先上传零级参考照片" : zeroSource.overexposed ? "零级参考照片过曝，请降低曝光后重拍" : !zeroSource.sharpnessOk ? "零级参考照片不够清晰，请重新对焦后拍摄" : zeroReadingDeg === null ? "请填写零级游标读数 φ₀" : !aImage ? "请上传一级单侧谱图" : aImage.overexposed ? "一级谱图过曝，请降低曝光后重拍" : !aImage.sharpnessOk ? "一级谱线不够清晰，请重新对焦后拍摄" : !aMarkers.length ? "请先标记或确认至少一条参考谱线" : !usableReadings.length ? "请填写一条已标记谱线对应的游标读数 φᵢ" : usableReadings.length === 1 ? "已生成单线暂估；再填写另一条谱线的游标读数可进行拟合、残差复核和报告" : !aComplete ? "已具备拟合数据，点击“执行测量”生成结果" : aResult && !aResult.reportable ? aResult.blockReason : "";
+  const status = !zeroSource || !aImage ? "待上传" : hasResult ? "已完成" : usableReadings.length === 1 ? "单线暂估" : blockReason ? "被阻塞" : "可计算";
 
   useEffect(() => {
     updateJourney({
-      capture: { imageCount: aImage ? 1 + repeatSources.length : 0, exposureOk: Boolean(aImage && !aImage.overexposed && repeatSources.every((item) => !item.overexposed)), sharpnessOk: Boolean(aImage?.sharpnessOk && repeatSources.every((item) => item.sharpnessOk)), zeroX: zeroDetection?.x ?? null, peakCount: aImage?.peaks.length ?? 0 },
+      capture: { imageCount: Number(Boolean(zeroSource)) + Number(Boolean(aImage)), exposureOk: Boolean(zeroSource && aImage && !zeroSource.overexposed && !aImage.overexposed), sharpnessOk: Boolean(zeroSource?.sharpnessOk && aImage?.sharpnessOk), zeroX: null, zeroReferenceCaptured: Boolean(zeroSource), zeroReadingDeg, peakCount: aImage?.peaks.length ?? 0 },
       identification: { matchedLines: aMarkers.length, yellowDoubletResolved },
       inversion: { reportable: hasResult, dUm: hasResult && aResult ? aResult.dUm : null, expandedUncertaintyUm: hasResult && aResult ? aResult.expandedUncertaintyUm : null, correlation: aResult?.identifiability.correlation ?? null, profileLowUm: aResult?.identifiability.profileLowUm ?? null, profileHighUm: aResult?.identifiability.profileHighUm ?? null, boundaryHit: aResult?.identifiability.boundaryHit ?? false, blockReason: hasResult ? "" : blockReason },
     });
-  }, [aImage, repeatSources, aMarkers.length, yellowDoubletResolved, zeroDetection?.x, hasResult, aResult, blockReason, updateJourney]);
+  }, [aImage, zeroSource, zeroReadingDeg, aMarkers.length, yellowDoubletResolved, hasResult, aResult, blockReason, updateJourney]);
 
   const recordSnapshot = useMemo<RecordSnapshot>(() => {
     const resultValue = hasResult && aResult ? `${aResult.dUm.toFixed(3)} ± ${aResult.expandedUncertaintyUm.toFixed(3)} μm (k=2)` : "进行中";
     const needsReview = Boolean(aImage && !hasResult);
     const steps: string[] = [];
     if (journey.prelab.capturedLines >= 2 && journey.prelab.dUm !== null) steps.push("虚拟预习");
-    if (aImage && !aImage.overexposed && aImage.sharpnessOk) steps.push("光谱采集与质量检查");
-    if (zeroDetection && aMarkers.length >= minimumReferences) steps.push("零级定位与参考线匹配");
+    if (zeroSource && zeroReadingDeg !== null && !zeroSource.overexposed && zeroSource.sharpnessOk) steps.push("零级参考采集与游标读数");
+    if (aImage && !aImage.overexposed && aImage.sharpnessOk) steps.push("一级单侧谱图采集与质量检查");
+    if (usableReadings.length >= 2) steps.push("谱线匹配与逐线游标读数");
     if (hasResult) steps.push("d 反演及不确定度评估", "云端归档与实验复盘");
     const payload = {
-      state: { detector, zeroX: effectiveZeroX, scaleL, complete: aComplete, sample: Boolean(aSource?.sample) },
+      state: { detector, zeroReadingDeg, lineReadings, vernierResolutionArcmin, complete: aComplete, sample: Boolean(aSource?.sample) },
       referenceMarkers: aMarkers,
       result: aResult,
-      processing: { peaks: aImage?.peaks.length ?? 0, overexposed: Boolean(aImage?.overexposed), sharpnessOk: Boolean(aImage?.sharpnessOk), zeroDetection },
-      evidence: { stages: ["虚拟预习", "光谱采集与质量检查", "零级定位与汞线匹配", "d 反演及不确定度评估", "云端归档与实验复盘"], limitation: "单张照片时不评定重复性；镜头畸变仅作为模型偏差诊断。" },
+      processing: { peaks: aImage?.peaks.length ?? 0, overexposed: Boolean(aImage?.overexposed), sharpnessOk: Boolean(aImage?.sharpnessOk), zeroReference: { uploaded: Boolean(zeroSource), overexposed: Boolean(zeroSource?.overexposed), sharpnessOk: Boolean(zeroSource?.sharpnessOk), readingDeg: zeroReadingDeg } },
+      evidence: { stages: ["虚拟预习", "零级参考采集与游标读数", "一级单侧谱图采集与质量检查", "谱线匹配与逐线游标读数", "d 反演及不确定度评估", "云端归档与实验复盘"], limitation: "零级参考照片与一级单侧谱图可分开采集。图像仅用于谱线识别与留存；每条参与拟合的谱线均以相对于 φ₀ 的游标读数计算衍射角。单条谱线仅显示暂估值，不作为可报告的拟合结果。" },
     };
     return {
       task: "A",
@@ -898,7 +907,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
       diagnosis,
       payload,
     };
-  }, [aResult, aImage, hasResult, detector, effectiveZeroX, scaleL, aComplete, aSource?.sample, aMarkers, diagnosis, zeroDetection, blockReason, journey.prelab, minimumReferences]);
+  }, [aResult, aImage, zeroSource, zeroReadingDeg, lineReadings, vernierResolutionArcmin, usableReadings.length, hasResult, detector, aComplete, aSource?.sample, aMarkers, diagnosis, blockReason, journey.prelab]);
 
   const hydrateRecord = useCallback(async (record: SavedRecord) => {
     const state = record.payload.state && typeof record.payload.state === "object" ? record.payload.state as Record<string, unknown> : {};
@@ -908,75 +917,80 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
     if (record.task !== "A") return;
     setDiagnosis(record.diagnosis);
     setAMarkers(markers);
-    if (typeof state.zeroX === "number") setZeroX(state.zeroX);
-    if (typeof state.scaleL === "number") setScaleL(state.scaleL);
+    setZeroReading(typeof state.zeroReadingDeg === "number" ? state.zeroReadingDeg.toFixed(4) : "");
+    if (typeof state.vernierResolutionArcmin === "number" && state.vernierResolutionArcmin > 0) setVernierResolutionArcmin(state.vernierResolutionArcmin);
+    setLineReadings(state.lineReadings && typeof state.lineReadings === "object" && !Array.isArray(state.lineReadings) ? Object.fromEntries(Object.entries(state.lineReadings as Record<string, unknown>).filter(([, value]) => typeof value === "string")) : {});
     setAComplete(Boolean(state.complete));
-    if (state.sample) { setASource(buildSampleSource()); setRepeatSources([]); }
+    if (state.sample) { setASource(buildSampleSource()); setZeroSource({ ...buildSampleSource(), fileName: "零级参考示例" }); }
     else {
+      setZeroSource(record.imageUrls.zero_reference ? await sourceFromSyncedImage(record.imageUrls.zero_reference).catch(() => null) : null);
       setASource(record.imageUrls.primary ? await sourceFromSyncedImage(record.imageUrls.primary).catch(() => null) : null);
-      setRepeatSources((await Promise.all([record.imageUrls.repeat_2, record.imageUrls.repeat_3].filter((url): url is string => Boolean(url)).map((url) => sourceFromSyncedImage(url).catch(() => null)))).filter((source): source is SpectrumSource => Boolean(source)));
     }
   }, []);
 
-  const sync = useExperimentSync({ task, enabled: Boolean(aImage), authenticated, snapshot: recordSnapshot, pendingImagesRef, onRemoteRecord: hydrateRecord });
+  const sync = useExperimentSync({ task, enabled: Boolean(zeroSource || aImage), authenticated, snapshot: recordSnapshot, pendingImagesRef, onRemoteRecord: hydrateRecord });
   const syncLabel = !authenticated ? "登录后可保存到云端" : sync.phase === "loading" ? "正在读取云端记录" : sync.phase === "pending" ? "有更改待同步" : sync.phase === "saving" ? "正在同步" : sync.phase === "retrying" ? "同步失败，正在重试" : sync.phase === "error" ? "同步失败" : sync.phase === "synced" && sync.lastSyncedAt ? `已同步 ${formatChinaClock(sync.lastSyncedAt)}` : "自动同步已就绪";
   useEffect(() => {
     if (hasResult && sync.phase === "synced" && sync.lastSyncedAt) updateJourney({ archive: { synced: true, recordId: null, syncedAt: sync.lastSyncedAt } });
   }, [hasResult, sync.phase, sync.lastSyncedAt, updateJourney]);
 
   const runPrimary = () => {
-    if (!aImage) return toast.warning("请先上传光谱照片");
-    if (aImage.overexposed) return toast.warning("照片过曝，结果已阻止；请降低曝光后重新拍摄");
-    if (!aImage.sharpnessOk) return toast.warning("照片清晰度不足，结果已阻止；请重新对焦");
-    if (!zeroDetection) return toast.warning("未能由画面或已匹配参考线确定零级；请继续标记");
-    if (aMarkers.length < minimumReferences) return toast.warning(`当前几何条件至少需要 ${minimumReferences} 条可靠参考线`);
+    if (!zeroSource) return toast.warning("请先上传零级参考照片");
+    if (zeroSource.overexposed || !zeroSource.sharpnessOk) return toast.warning("请使用曝光正常、清晰的零级参考照片");
+    if (zeroReadingDeg === null) return toast.warning("请填写零级游标读数 φ₀");
+    if (!aImage) return toast.warning("请上传一级单侧谱图");
+    if (aImage.overexposed) return toast.warning("一级谱图过曝，结果已阻止；请降低曝光后重新拍摄");
+    if (!aImage.sharpnessOk) return toast.warning("一级谱图清晰度不足，结果已阻止；请重新对焦");
+    if (usableReadings.length < 2) return toast.warning(usableReadings.length === 1 ? "当前可显示单线暂估；请再填写一条不同谱线的游标读数以完成拟合" : "请填写至少一条已标记谱线的游标读数");
     setAComplete(true);
   };
   const resetTask = () => {
     sync.resetSync();
     setDiagnosis("");
     setDetector({ prominence: .018, minDistancePx: 3 }); setSelectedWavelength(546.07);
-    setASource(null); setRepeatSources([]); setAMarkers([]); setZeroX(100); setScaleL(4000); setAComplete(false);
+    setASource(null); setZeroSource(null); setAMarkers([]); setZeroReading(""); setLineReadings({}); setVernierResolutionArcmin(1); setAComplete(false);
   };
   const summary = [
-    ["零级位置", zeroDetection ? `${zeroDetection.x.toFixed(2)} px${"inferred" in zeroDetection ? "（参考线反推）" : ""}` : "未找到"], ["匹配参考线", `${aMarkers.length} 条`], ["候选谱线", `${aImage?.peaks.length ?? 0} 条`], ["光栅常数 d", hasResult && aResult ? `${aResult.dUm.toFixed(3)} μm` : "未形成结果"],
+    ["零级参考", zeroSource && zeroReadingDeg !== null ? `φ₀ = ${zeroReadingDeg.toFixed(4)}°` : "待上传 / 待读数"], ["匹配参考线", `${aMarkers.length} 条`], ["已填游标", `${usableReadings.length} 条`], ["光栅常数 d", hasResult && aResult ? `${aResult.dUm.toFixed(3)} μm` : singleLineEstimate ? `${singleLineEstimate.toFixed(3)} μm（暂估）` : "未形成结果"],
   ];
 
   return <div className="module-page analysis-page">
     <FlowBanner stage="2–4 / 5 · 采集、识别与反演" navigate={navigate} />
-    <PageHeading eyebrow="实验 · 图像分析工作台" title="从光谱照片到可复核的测量结果。" description="调整检测参数、标记参考谱线，再沿强度曲线、拟合残差和处理过程检查每一步。" />
+    <PageHeading eyebrow="实验 · 图像分析工作台" title="从两份采集证据到可复核的测量结果。" description="零级参考图与 φ₀ 单独采集；一级单侧谱图用于认线。逐线游标读数决定衍射角，图像不再反推未知光栅常数。" />
     <div className="analysis-workbench">
-      <aside className="panel parameter-panel"><div className="analysis-card-heading"><span><SlidersHorizontal size={18} /></span><div><h2>测量参数</h2><p>优先检测 x₀；画外零级由已匹配参考线联合标定。</p></div></div><div className="parameter-form">
-        <label>零级位置 x₀（独立检测）<input type="number" value={Number(effectiveZeroX.toFixed(2))} disabled /></label><label>成像尺度 L（主拟合）<input type="number" value={aResult ? Number(aResult.L.toFixed(1)) : scaleL} disabled /></label>
+      <aside className="panel parameter-panel"><div className="analysis-card-heading"><span><SlidersHorizontal size={18} /></span><div><h2>测量参数</h2><p>零级和一级读数来自分光计游标；图片仅负责认线、质检和留存。</p></div></div><div className="parameter-form">
+        <label>游标最小分度（′）<input type="number" min=".01" max="60" step=".01" value={vernierResolutionArcmin} onChange={(event) => { const value = Number(event.target.value); setVernierResolutionArcmin(Number.isFinite(value) ? Math.min(60, Math.max(.01, value)) : 1); setAComplete(false); }} /></label>
         <label>峰值突出度 <output>{detector.prominence.toFixed(3)}</output><input type="range" min=".005" max=".2" step=".005" value={detector.prominence} onChange={(event) => setDetector((value) => ({ ...value, prominence: Number(event.target.value) }))} /></label>
         <label>最小峰间距（px）<input type="number" min="2" max="64" value={detector.minDistancePx} onChange={(event) => setDetector((value) => ({ ...value, minDistancePx: Math.min(64, Math.max(2, Number(event.target.value))) }))} /></label>
         <div className="parameter-buttons"><button className="reset-button parameter-reset" onClick={resetTask}><RotateCcw size={15} />恢复默认</button><button className="reset-button parameter-reset sample-button" onClick={loadSample}><Play size={15} />加载示例</button></div>
       </div></aside>
-      <section className="panel calibration-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>光栅常数反演</h2><p>候选谱线数量不限；按实际可见谱线自适应检测并匹配参考库。</p></div><em className={`analysis-status ${status === "已完成" ? "done" : ""}`}>{status}</em></div>
-        <SpectrumStage image={aImage} markers={aMarkers} onMark={addMarker} caption={aImage?.sample ? "示例图像 · 一级汞灯光谱" : "参考图像 · 已完成强度提取"} />
-        <MarkerPicker selected={selectedWavelength} setSelected={setSelectedWavelength} markers={aMarkers} onClear={() => setAMarkers([])} onRemove={removeMarker} image={aImage} onCandidate={addMarker} />
-        <div className="analysis-actions"><label className="upload-button"><Upload size={17} />上传 1–3 张照片<input type="file" accept="image/*" multiple hidden onChange={(event) => upload(event.target.files ?? undefined)} /></label><label className="camera-button"><Camera size={17} />手机拍摄<input type="file" accept="image/*" capture="environment" hidden onChange={(event) => upload(event.target.files ?? undefined)} /></label><button className="analyze-button" disabled={busy} onClick={runPrimary}><Play size={17} />{busy ? "处理中…" : "执行测量"}</button></div>
-        {aImage && <div className="quality-row"><span><i className={!zeroDetection ? "warn" : ""} />{zeroDetection ? `零级 ${zeroDetection.x.toFixed(2)} px${"inferred" in zeroDetection ? " · 参考线反推" : ""}` : "未找到零级"}</span><span><i />候选峰 {aImage.peaks.length} 条</span><span><i className={aImage.overexposed ? "warn" : ""} />{aImage.overexposed ? "高光偏多" : "曝光正常"}</span><span><i className={!aImage.sharpnessOk ? "warn" : ""} />{aImage.sharpnessOk ? "清晰度通过" : "清晰度不足"}</span></div>}
-        {blockReason && aImage && <p className="inline-warning"><CircleAlert size={15} />{blockReason}</p>}
+      <section className="panel calibration-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>未知光栅常数反演</h2><p>一张零级参考图配 φ₀；一张一级单侧谱图自动认线。候选线数量不限，只有填入游标读数的谱线参与计算。</p></div><em className={`analysis-status ${status === "已完成" ? "done" : ""}`}>{status}</em></div>
+        <div className="zero-reference-card"><div className="zero-reference-copy"><span><Target size={17} /></span><div><strong>零级参考读数 / 图片</strong><p>先将零级像对准十字叉丝，上传同一时刻的参考照片并填写一次 φ₀。它可以不在一级谱图的画面中。</p>{zeroSource && <small>{zeroSource.fileName} · {zeroSource.overexposed ? "曝光需复核" : zeroSource.sharpnessOk ? "清晰度通过" : "清晰度需复核"}</small>}</div></div><div className="zero-reference-controls"><label>零级游标 φ₀（°）<input inputMode="decimal" type="number" min="-360" max="360" step=".0001" value={zeroReading} onChange={(event) => { setZeroReading(event.target.value); setAComplete(false); }} placeholder="例如 120.0000" /></label><label className="upload-button compact-upload"><Upload size={16} />上传零级参考图<input type="file" accept="image/*" hidden onChange={(event) => uploadZeroReference(event.target.files ?? undefined)} /></label></div></div>
+        <SpectrumStage image={aImage} markers={aMarkers} onMark={addMarker} caption={aImage?.sample ? "示例图像 · 一级单侧汞灯光谱" : "一级单侧谱图 · 已完成强度提取"} />
+        <MarkerPicker selected={selectedWavelength} setSelected={setSelectedWavelength} markers={aMarkers} onClear={() => { setAMarkers([]); setLineReadings({}); setAComplete(false); }} onRemove={removeMarker} image={aImage} onCandidate={addMarker} />
+        <div className="vernier-readings"><div><strong>一级谱线游标读数 φᵢ</strong><p>将每条准备使用的谱线依次对准十字叉丝，分别填写一个读数。填 1 条显示单线暂估；填 2 条或更多条才做拟合与残差复核。</p></div>{aMarkers.length ? <div className="vernier-reading-list">{aMarkers.map((marker) => { const key = lineReadingKey(marker.wavelengthNm); const reading = degreesFromReading(lineReadings[key] ?? ""); const theta = zeroReadingDeg !== null && reading !== null ? circularAngleDifferenceDeg(reading, zeroReadingDeg) : null; return <label key={marker.wavelengthNm}><i style={{ background: lineColor(marker.wavelengthNm) }} /><span>{marker.wavelengthNm.toFixed(2)} nm<small>{theta !== null && theta > .005 && theta < 89.995 ? `θ = ${theta.toFixed(4)}°` : "待填 φᵢ"}</small></span><input aria-label={`${marker.wavelengthNm.toFixed(2)} nm 的游标读数`} inputMode="decimal" type="number" min="-360" max="360" step=".0001" value={lineReadings[key] ?? ""} onChange={(event) => { const value = event.target.value; setLineReadings((current) => ({ ...current, [key]: value })); setAComplete(false); }} placeholder="φᵢ（°）" /></label>; })}</div> : <p className="vernier-empty">先上传一级单侧谱图并确认谱线标记。</p>}{singleLineEstimate !== null && usableReadings.length === 1 && <p className="single-line-estimate"><CircleAlert size={15} />单线暂估：d ≈ {singleLineEstimate.toFixed(3)} μm。它不能提供残差或精度验证，请再填写一条谱线读数。</p>}</div>
+        <div className="analysis-actions"><label className="upload-button"><Upload size={17} />上传一级单侧谱图<input type="file" accept="image/*" hidden onChange={(event) => uploadSpectrum(event.target.files ?? undefined)} /></label><label className="camera-button"><Camera size={17} />手机拍摄<input type="file" accept="image/*" capture="environment" hidden onChange={(event) => uploadSpectrum(event.target.files ?? undefined)} /></label><button className="analyze-button" disabled={busy} onClick={runPrimary}><Play size={17} />{busy ? "处理中…" : "执行测量"}</button></div>
+        {(zeroSource || aImage) && <div className="quality-row"><span><i className={!zeroSource || zeroSource.overexposed || !zeroSource.sharpnessOk ? "warn" : ""} />{zeroSource ? zeroReadingDeg === null ? "零级图已上传 · 待填 φ₀" : `零级 φ₀ = ${zeroReadingDeg.toFixed(4)}°` : "待上传零级参考图"}</span>{aImage && <><span><i />候选峰 {aImage.peaks.length} 条</span><span><i className={aImage.overexposed ? "warn" : ""} />{aImage.overexposed ? "高光偏多" : "曝光正常"}</span><span><i className={!aImage.sharpnessOk ? "warn" : ""} />{aImage.sharpnessOk ? "清晰度通过" : "清晰度不足"}</span></>}</div>}
+        {blockReason && (zeroSource || aImage) && <p className="inline-warning"><CircleAlert size={15} />{blockReason}</p>}
       </section>
     </div>
-    <section className="panel overview-panel"><div><h2>结果总览</h2><p>{!authenticated ? "匿名状态可完成本地分析；登录后自动保存实验过程。" : hasResult ? "关键参数、最终结果与残差会自动同步。" : "上传图片后即开始保存实验过程，完成计算后自动更新结果。"}</p><span className={`sync-state ${sync.phase}`} aria-live="polite">{sync.phase === "error" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{syncLabel}</span>{sync.phase === "error" && sync.errorMessage && <small className="sync-error">{sync.errorMessage}</small>}</div><div className="overview-metrics">{summary.map(([label, value]) => <span key={label}><small>{label}</small><strong>{value}</strong></span>)}</div>{hasResult && (!authenticated || sync.currentSnapshotSynced) ? <button className="primary-action" onClick={finishExperiment}><CheckCircle2 size={16} />完成本次实验</button> : <button className="secondary-action" onClick={() => sync.phase === "error" && !aImage ? sync.retryLoad() : void sync.syncNow()} disabled={!authenticated || sync.phase === "saving" || sync.phase === "retrying" || (!aImage && sync.phase !== "error")}><Save size={16} />{sync.phase === "error" && !aImage ? "重新读取" : sync.phase === "error" ? "立即重试" : "立即同步"}</button>}</section>
+    <section className="panel overview-panel"><div><h2>结果总览</h2><p>{!authenticated ? "匿名状态可完成本地分析；登录后自动保存实验过程。" : hasResult ? "关键参数、最终结果与残差会自动同步。" : "上传任一证据照片后即开始保存实验过程，完成计算后自动更新结果。"}</p><span className={`sync-state ${sync.phase}`} aria-live="polite">{sync.phase === "error" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{syncLabel}</span>{sync.phase === "error" && sync.errorMessage && <small className="sync-error">{sync.errorMessage}</small>}</div><div className="overview-metrics">{summary.map(([label, value]) => <span key={label}><small>{label}</small><strong>{value}</strong></span>)}</div>{hasResult && (!authenticated || sync.currentSnapshotSynced) ? <button className="primary-action" onClick={finishExperiment}><CheckCircle2 size={16} />完成本次实验</button> : <button className="secondary-action" onClick={() => sync.phase === "error" && !zeroSource && !aImage ? sync.retryLoad() : void sync.syncNow()} disabled={!authenticated || sync.phase === "saving" || sync.phase === "retrying" || (!zeroSource && !aImage && sync.phase !== "error")}><Save size={16} />{sync.phase === "error" && !zeroSource && !aImage ? "重新读取" : sync.phase === "error" ? "立即重试" : "立即同步"}</button>}</section>
     <section className="panel review-note-panel"><div className="analysis-card-heading"><span><ClipboardCheck size={18} /></span><div><h2>异常诊断与复核意见</h2><p>记录异常现象、可能原因和复核结论；输入内容会随实验记录自动同步。</p></div></div><textarea value={diagnosis} maxLength={2000} onChange={(event) => setDiagnosis(event.target.value)} placeholder="例如：黄色双线未完全分离，已重新调整狭缝并复测。" /></section>
     <div className="analysis-results-grid">
       <section className="panel intensity-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>强度剖面与谱线标注</h2><p>曲线、候选峰和人工参考标记来自当前图像数据。</p></div></div><IntensityChart image={aImage} markers={aMarkers} title="光谱横向强度剖面" /></section>
-      <div className="analysis-result-stack"><section className="panel final-result-card"><div className="analysis-card-heading"><span><BarChart3 size={18} /></span><div><h2>最终光栅结果</h2><p>仅当可辨识性、边界与质量检查全部通过时生成。</p></div></div>{hasResult && aResult ? <div className="final-measure"><small>{"calibrationMode" in aResult ? aResult.lensCorrectionApplied ? "标称光栅约束校准 · 自适应径向校正" : "标称光栅约束校准" : "光栅常数 d"} · {aResult.uncertaintyLabel}</small><strong>{aResult.dUm.toFixed(3)} <em>± {aResult.expandedUncertaintyUm.toFixed(3)} μm</em></strong><p>U = 2u<sub>c</sub>，k = {aResult.coverageFactor} · {aResult.linesPerMm.toFixed(1)} 线/mm</p><p>{zeroDetection && "inferred" in zeroDetection ? "参考线联合反推" : "独立"} x₀ = {aResult.x0.toFixed(2)} px · 拟合 |L| = {Math.abs(aResult.L).toFixed(1)} px</p></div> : <div className="result-placeholder"><FlaskConical size={28} /><span>{aResult ? `候选拟合不可报告：${aResult.blockReason || blockReason}` : "等待执行测量"}</span></div>}</section>
+      <div className="analysis-result-stack"><section className="panel final-result-card"><div className="analysis-card-heading"><span><BarChart3 size={18} /></span><div><h2>最终光栅结果</h2><p>以零级和逐线游标读数计算；两条及以上谱线才产生可报告拟合。</p></div></div>{hasResult && aResult ? <div className="final-measure"><small>光栅常数 d · {aResult.uncertaintyLabel}</small><strong>{aResult.dUm.toFixed(3)} <em>± {aResult.expandedUncertaintyUm.toFixed(3)} μm</em></strong><p>U = 2u<sub>c</sub>，k = {aResult.coverageFactor} · {aResult.linesPerMm.toFixed(1)} 线/mm</p><p>φ₀ = {aResult.zeroReadingDeg.toFixed(4)}° · 已纳入 {aResult.lineReadingCount} 条一级谱线读数</p></div> : <div className="result-placeholder"><FlaskConical size={28} /><span>{singleLineEstimate !== null ? `单线暂估 d ≈ ${singleLineEstimate.toFixed(3)} μm；待另一条谱线读数复核` : aResult ? `候选拟合不可报告：${aResult.blockReason || blockReason}` : "等待执行测量"}</span></div>}</section>
         <section className="panel residual-card"><div className="analysis-card-heading"><span><Target size={18} /></span><div><h2>拟合残差复核</h2><p>逐条检查预测值与参考值。</p></div></div>{aResult ? <div className="residual-table"><div><b>标准 λ</b><b>换算 θ</b><b>残差</b></div>{aResult.points.map((point) => <div key={point.wavelengthNm}><span>{point.wavelengthNm.toFixed(2)} nm</span><span>{point.thetaDeg.toFixed(3)}°</span><strong>{point.residualNm >= 0 ? "+" : ""}{point.residualNm.toFixed(3)} nm</strong></div>)}</div> : <div className="result-placeholder compact"><Target size={25} /><span>完成计算后显示逐线残差</span></div>}</section></div>
     </div>
-    {aResult && <section className="panel uncertainty-panel"><div className="analysis-card-heading wide"><span><CircleHelp size={18} /></span><div><h2>完整不确定度预算</h2><p>各标准不确定度按平方和合成 u<sub>c</sub>；覆盖因子 k=2。</p></div></div><div className="uncertainty-table"><div><b>分量</b><b>标准不确定度</b><b>评定状态</b></div>{aResult.uncertaintyBudget.map((item) => <div key={item.key}><span>{item.label}</span><strong>{item.standardUncertaintyUm === null ? "—" : `${item.standardUncertaintyUm.toFixed(4)} μm`}</strong><em>{item.status}</em></div>)}</div><div className="diagnostic-strip"><span>相关系数 <strong>{aResult.identifiability.correlation.toFixed(5)}</strong></span><span>95% 剖面区间 <strong>{aResult.identifiability.profileLowUm.toFixed(3)}–{aResult.identifiability.profileHighUm.toFixed(3)} μm</strong></span><span>边界检查 <strong>{aResult.identifiability.boundaryHit ? "命中" : "通过"}</strong></span></div></section>}
-    <section className="panel process-panel"><div className="analysis-card-heading wide"><span><SlidersHorizontal size={18} /></span><div><h2>图像处理全过程</h2><p>从原始照片到物理结果，每一步都保留可复核的实际数据。</p></div></div><ProcessingTimeline image={aImage} selectedCount={aMarkers.length} resultText={aResult ? `d = ${aResult.dUm.toFixed(3)} μm` : "等待执行计算"} /></section>
+    {aResult && <section className="panel uncertainty-panel"><div className="analysis-card-heading wide"><span><CircleHelp size={18} /></span><div><h2>完整不确定度预算</h2><p>游标读数不确定度已经对零级与每条一级读数的差值合成；覆盖因子 k=2。</p></div></div><div className="uncertainty-table"><div><b>分量</b><b>标准不确定度</b><b>评定状态</b></div>{aResult.uncertaintyBudget.map((item) => <div key={item.key}><span>{item.label}</span><strong>{item.standardUncertaintyUm === null ? "—" : `${item.standardUncertaintyUm.toFixed(4)} μm`}</strong><em>{item.status}</em></div>)}</div><div className="diagnostic-strip"><span>最大残差 <strong>{aResult.maxResidualNm.toFixed(3)} nm</strong></span><span>95% 近似区间 <strong>{aResult.identifiability.profileLowUm.toFixed(3)}–{aResult.identifiability.profileHighUm.toFixed(3)} μm</strong></span><span>残差检查 <strong>{aResult.maxResidualNm <= 1 ? "通过" : "需复核"}</strong></span></div></section>}
+    <section className="panel process-panel"><div className="analysis-card-heading wide"><span><SlidersHorizontal size={18} /></span><div><h2>图像处理全过程</h2><p>图像用于谱线识别，物理计算只使用已记录的游标读数。</p></div></div><ProcessingTimeline image={aImage} selectedCount={usableReadings.length} resultText={aResult ? `d = ${aResult.dUm.toFixed(3)} μm` : singleLineEstimate ? `单线暂估 d ≈ ${singleLineEstimate.toFixed(3)} μm` : "等待游标读数"} /></section>
   </div>;
 }
 
 const guideSteps = [
   { title: "虚拟预习", detail: "在虚拟分光计中瞄准至少两条汞线并生成拟合，建立真实操作顺序。", image: "/guide/01-align-optics.jpg", alt: "实验人员调节真实分光计", position: "center 42%", credit: "SAHAYA RAJAN S · CC0", source: "https://commons.wikimedia.org/wiki/File:Spectrometer_prism_table.jpg", target: "simulator" as ModuleId },
-  { title: "光谱采集与质量检查", detail: "上传实际可见的单侧一级光谱；零级可在画内，也可由参考线标定画外位置。", image: "/guide/02-zero-order.jpg", alt: "真实光学实验台", position: "center 48%", credit: "Waifer X · CC BY 2.0", source: "https://commons.wikimedia.org/wiki/File:Optical_Bench_educational_Kit_-_Cuesta_College.jpg", target: "analysis" as ModuleId },
-  { title: "自适应标定与谱线匹配", detail: "按实际谱线数量匹配参考库，并排除叉丝、刻度等伪峰；不强制固定条数。", image: "/guide/03-aim-lines.jpg", alt: "光栅产生的真实可见光谱", position: "center 47%", credit: "NOIRLab / NSF / AURA · CC BY 4.0", source: "https://commons.wikimedia.org/wiki/File:Diffraction_grating_(noao-02613).jpg", target: "analysis" as ModuleId },
-  { title: "d 反演及不确定度评估", detail: "只估计数据支持的 L 与 d，并检查相关性、剖面区间、边界和完整不确定度预算。", image: "/guide/05-calculate.jpg", alt: "实验室电脑正在分析测量数据", position: "center 44%", credit: "MikeRun · CC BY-SA 4.0", source: "https://commons.wikimedia.org/wiki/File:Lab-notebook-spreadsheet-simulation.jpg", target: "analysis" as ModuleId },
+  { title: "光谱采集与质量检查", detail: "分别上传零级参考图与一级单侧谱图；零级可以不在一级谱图的画面中。", image: "/guide/02-zero-order.jpg", alt: "真实光学实验台", position: "center 48%", credit: "Waifer X · CC BY 2.0", source: "https://commons.wikimedia.org/wiki/File:Optical_Bench_educational_Kit_-_Cuesta_College.jpg", target: "analysis" as ModuleId },
+  { title: "自适应标定与谱线匹配", detail: "按实际谱线数量匹配参考库，排除叉丝、刻度等伪峰；将用于计算的每条谱线分别对准叉丝并填写游标读数。", image: "/guide/03-aim-lines.jpg", alt: "光栅产生的真实可见光谱", position: "center 47%", credit: "NOIRLab / NSF / AURA · CC BY 4.0", source: "https://commons.wikimedia.org/wiki/File:Diffraction_grating_(noao-02613).jpg", target: "analysis" as ModuleId },
+  { title: "d 反演及不确定度评估", detail: "以 θᵢ = |φᵢ − φ₀| 和 d sin θ = λ 反演未知 d；单条谱线仅暂估，两条及以上才检查残差和不确定度。", image: "/guide/05-calculate.jpg", alt: "实验室电脑正在分析测量数据", position: "center 44%", credit: "MikeRun · CC BY-SA 4.0", source: "https://commons.wikimedia.org/wiki/File:Lab-notebook-spreadsheet-simulation.jpg", target: "analysis" as ModuleId },
   { title: "云端归档与实验复盘", detail: "结果、照片、逐线残差、不确定度预算与异常诊断同步后，形成可导出的证据链。", image: "/guide/06-uncertainty.jpg", alt: "实验人员复核分析结果", position: "center 52%", credit: "Linda Bartlett / NCI · Public domain", source: "https://commons.wikimedia.org/wiki/File:Scientists_examine_a_graph.jpg", target: "records" as ModuleId },
 ];
 
@@ -984,7 +998,7 @@ function GuideModule({ journey, navigate }: { journey: ExperimentJourney; naviga
   const states = [
     { done: journey.prelab.capturedLines >= 2 && journey.prelab.dUm !== null, data: `${journey.prelab.capturedLines} 条谱线${journey.prelab.dUm ? ` · d=${journey.prelab.dUm.toFixed(3)} μm` : ""}`, reason: "至少记录两条谱线并生成拟合" },
     { done: journey.capture.imageCount > 0 && journey.capture.exposureOk && journey.capture.sharpnessOk, data: journey.capture.imageCount ? `${journey.capture.imageCount} 张 · 曝光${journey.capture.exposureOk ? "通过" : "未通过"} · 清晰度${journey.capture.sharpnessOk ? "通过" : "未通过"}` : "尚无真实照片", reason: "需上传真实照片并通过曝光、清晰度检查" },
-    { done: journey.capture.zeroX !== null && journey.identification.matchedLines >= 2, data: `零级 ${journey.capture.zeroX?.toFixed(2) ?? "—"} px · 匹配 ${journey.identification.matchedLines} 条`, reason: "需确定零级并满足当前几何条件的最少参考线数" },
+    { done: journey.capture.zeroReferenceCaptured && journey.capture.zeroReadingDeg !== null && journey.identification.matchedLines >= 1, data: `零级参考${journey.capture.zeroReferenceCaptured ? "已上传" : "未上传"} · φ₀ ${journey.capture.zeroReadingDeg?.toFixed(4) ?? "—"}° · 匹配 ${journey.identification.matchedLines} 条`, reason: "需上传零级参考图、填写 φ₀ 并确认至少一条参考谱线" },
     { done: journey.inversion.reportable, data: journey.inversion.reportable ? `d=${journey.inversion.dUm?.toFixed(3)} ± ${journey.inversion.expandedUncertaintyUm?.toFixed(3)} μm` : "尚未形成可报告结果", reason: journey.inversion.blockReason || "需通过可辨识性与边界检查" },
     { done: journey.archive.synced, data: journey.archive.syncedAt ? `已同步 · ${formatChinaDateTime(journey.archive.syncedAt)}` : "尚未归档", reason: "需将结果与证据成功同步到云端记录" },
   ];
@@ -1033,7 +1047,7 @@ function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: M
   return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="回看每次实验，复核过程与结果。" description="查看实验步骤、原始光谱、测量结果与异常诊断；支持导出 CSV 和实验报告。" action={<button className="secondary-action" onClick={exportCsv} disabled={!records.length}><Download size={16} />导出全部 CSV</button>} />
     <div className={`records-sync ${errorMessage ? "error" : ""}`} aria-live="polite">{errorMessage ? <><CircleAlert size={15} /><span>{errorMessage}</span><button onClick={() => void refresh()}>重新加载</button></> : <><CheckCircle2 size={15} /><span>{lastUpdated ? `云端记录已更新 · ${formatChinaClock(lastUpdated)}` : "正在连接云端记录"}</span></>}</div>
     <div className="records-grid"><section className="panel record-list"><div className="panel-title"><div><span className="step-index"><History size={14} /></span><h2>我的实验</h2></div><span>{records.length} 条</span></div>{loading ? <div className="record-empty">正在读取实验记录…</div> : records.length ? records.map((record) => <button key={record.id} className={selected?.id === record.id ? "active" : ""} onClick={() => setSelected(record)}><span className="record-source"><Waves size={18} /></span><div><strong>{record.resultLabel}<small>{record.resultValue}</small></strong><p><Clock3 size={12} />{formatChinaDateTime(record.updatedAt)} · {record.source}</p></div><em className={record.status === "completed" ? "good" : ""}>{record.status === "draft" ? "进行中" : record.status === "needs_review" ? "需复核" : "已完成"}</em></button>) : <div className="record-empty"><History size={30} /><strong>还没有实验记录</strong><p>上传光谱图片后，实验过程会自动同步并出现在这里。</p></div>}</section>
-      <section className="panel replay-panel">{selected ? <><div className="replay-head"><div><p className="eyebrow">实验回放</p><h2>{selected.resultLabel} · {selected.resultValue}</h2><small>最后同步于 {formatChinaDateTime(selected.updatedAt)}</small></div><a className="secondary-action" href={`/api/records/${encodeURIComponent(selected.id)}/report`} target="_blank" rel="noreferrer"><FileText size={16} />查看 / 打印报告</a></div><div className="record-evidence"><span><small>已完成阶段</small><strong>{selected.steps.length} 项</strong></span><span><small>匹配汞线</small><strong>{markerCount} 条</strong></span><span><small>记录状态</small><strong>{selected.quality}</strong></span></div>{imageEntries.length > 0 && <div className="record-images">{imageEntries.map(([slot, url]) => <figure key={slot}><Image src={url} alt="汞灯零级与单侧一级原始照片" width={800} height={450} unoptimized /><figcaption>{slot === "primary" ? "主测照片" : slot === "repeat_2" ? "重复照片 2" : "重复照片 3"}</figcaption></figure>)}</div>}<div className="timeline">{selected.steps.length ? selected.steps.map((step, index) => <div className="timeline-item" key={step}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step}</strong><p>{step === "d 反演及不确定度评估" ? `${selected.resultLabel} = ${selected.resultValue}` : "该阶段的参数和证据已保存到云端记录。"}</p></div>{index < selected.steps.length - 1 && <i />}</div>) : <div className="record-empty compact"><History size={28} /><strong>实验尚未开始</strong></div>}</div><div className="record-diagnosis"><strong>异常诊断与复核意见</strong><p>{selected.diagnosis || "未填写异常诊断或复核意见。"}</p></div></> : <div className="record-empty"><Microscope size={34} /><strong>选择一条记录开始回放</strong></div>}</section></div>
+      <section className="panel replay-panel">{selected ? <><div className="replay-head"><div><p className="eyebrow">实验回放</p><h2>{selected.resultLabel} · {selected.resultValue}</h2><small>最后同步于 {formatChinaDateTime(selected.updatedAt)}</small></div><a className="secondary-action" href={`/api/records/${encodeURIComponent(selected.id)}/report`} target="_blank" rel="noreferrer"><FileText size={16} />查看 / 打印报告</a></div><div className="record-evidence"><span><small>已完成阶段</small><strong>{selected.steps.length} 项</strong></span><span><small>匹配汞线</small><strong>{markerCount} 条</strong></span><span><small>记录状态</small><strong>{selected.quality}</strong></span></div>{imageEntries.length > 0 && <div className="record-images">{imageEntries.map(([slot, url]) => <figure key={slot}><Image src={url} alt="汞灯零级参考与单侧一级原始照片" width={800} height={450} unoptimized /><figcaption>{slot === "zero_reference" ? "零级参考照片" : slot === "primary" ? "一级单侧谱图" : slot === "repeat_2" ? "重复照片 2" : "重复照片 3"}</figcaption></figure>)}</div>}<div className="timeline">{selected.steps.length ? selected.steps.map((step, index) => <div className="timeline-item" key={step}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step}</strong><p>{step === "d 反演及不确定度评估" ? `${selected.resultLabel} = ${selected.resultValue}` : "该阶段的参数和证据已保存到云端记录。"}</p></div>{index < selected.steps.length - 1 && <i />}</div>) : <div className="record-empty compact"><History size={28} /><strong>实验尚未开始</strong></div>}</div><div className="record-diagnosis"><strong>异常诊断与复核意见</strong><p>{selected.diagnosis || "未填写异常诊断或复核意见。"}</p></div></> : <div className="record-empty"><Microscope size={34} /><strong>选择一条记录开始回放</strong></div>}</section></div>
   </div>;
 }
 

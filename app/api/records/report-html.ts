@@ -8,6 +8,11 @@ const formatNumber = (value: unknown, digits = 3, suffix = "") => {
   const number = numberValue(value);
   return number === null ? "未记录" : `${number.toFixed(digits)}${suffix}`;
 };
+const inputNumber = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : null; }
+  return null;
+};
 const formatDate = (value: string | number) => new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
 }).format(new Date(value));
@@ -20,6 +25,8 @@ export function buildExperimentReportHtml(record: SavedRecord) {
   const result = objectValue(payload.result);
   const identification = objectValue(result.identifiability);
   const evidence = objectValue(payload.evidence);
+  const lineReadings = objectValue(state.lineReadings);
+  const zeroReference = objectValue(processing.zeroReference);
   const markers = Array.isArray(payload.referenceMarkers) ? payload.referenceMarkers.map(objectValue) : [];
   const points = Array.isArray(result.points) ? result.points.map(objectValue) : [];
   const budget = Array.isArray(result.uncertaintyBudget) ? result.uncertaintyBudget.map(objectValue) : [];
@@ -27,12 +34,14 @@ export function buildExperimentReportHtml(record: SavedRecord) {
   const status = record.status === "completed" ? "已完成" : record.status === "needs_review" ? "需复核" : "进行中";
   const limitation = typeof evidence.limitation === "string" ? evidence.limitation : "未记录额外限制。";
   const blockReason = typeof result.blockReason === "string" && result.blockReason ? result.blockReason : "无阻塞项。";
-  const labels: Record<string, string> = { primary: "主测原始光谱", repeat_2: "重复测量照片 2", repeat_3: "重复测量照片 3" };
+  const labels: Record<string, string> = { zero_reference: "零级参考照片", primary: "一级单侧原始光谱", repeat_2: "重复测量照片 2", repeat_3: "重复测量照片 3" };
   const images = Object.entries(record.imageUrls).map(([slot, url]) => `<figure><img src="${escapeHtml(url)}" alt="${escapeHtml(labels[slot] ?? "原始光谱图片")}"><figcaption>${escapeHtml(labels[slot] ?? "原始光谱图片")}</figcaption></figure>`).join("");
   const markerRows = markers.map((marker, index) => {
     const point = points.find((item) => numberValue(item.wavelengthNm) === numberValue(marker.wavelengthNm)) ?? {};
     const ratio = numberValue(marker.xRatio);
-    return `<tr><td>${index + 1}</td><td>${formatNumber(marker.wavelengthNm, 2, " nm")}</td><td>${ratio === null ? "未记录" : `${(ratio * 100).toFixed(2)}%`}</td><td>${formatNumber(point.thetaDeg, 3, "°")}</td><td>${formatNumber(point.residualNm, 3, " nm")}</td></tr>`;
+    const wavelength = numberValue(marker.wavelengthNm);
+    const reading = wavelength === null ? null : inputNumber(lineReadings[wavelength.toFixed(2)]);
+    return `<tr><td>${index + 1}</td><td>${formatNumber(marker.wavelengthNm, 2, " nm")}</td><td>${ratio === null ? "未记录" : `${(ratio * 100).toFixed(2)}%`}</td><td>${reading === null ? "未填写" : `${reading.toFixed(4)}°`}</td><td>${formatNumber(point.thetaDeg, 4, "°")}</td><td>${formatNumber(point.residualNm, 3, " nm")}</td></tr>`;
   }).join("");
   const budgetRows = budget.map((item) => `<tr><td>${escapeHtml(item.label ?? "未命名分量")}</td><td>${formatNumber(item.standardUncertaintyUm, 4, " μm")}</td><td>${escapeHtml(item.status ?? "未评定")}</td></tr>`).join("");
   const steps = record.steps.map((step, index) => `<li><span>${index + 1}</span><div><strong>${escapeHtml(step)}</strong><small>相关参数与证据已保存至本次云端记录。</small></div></li>`).join("");
@@ -46,13 +55,13 @@ export function buildExperimentReportHtml(record: SavedRecord) {
 </style></head><body><div class="toolbar"><strong>实验报告预览</strong><button type="button" onclick="window.print()">打印 / 保存为 PDF</button></div><main class="report">
 <header><p class="kicker">SPECTRA · 实验记录</p><h1>${escapeHtml(title)}</h1><p class="subtitle">由已同步的实验数据自动整理，可直接阅读、打印或保存为 PDF。</p></header>
 <section><h2>一、实验基本信息</h2><div class="meta"><div class="cell"><small>记录编号</small><strong>${escapeHtml(record.id)}</strong></div><div class="cell"><small>实验光源</small><strong>${escapeHtml(record.source)}</strong></div><div class="cell"><small>记录状态</small><strong class="${reportable ? "ok" : "warn"}">${status}</strong></div><div class="cell"><small>创建时间</small><strong>${formatDate(record.createdAt)}</strong></div><div class="cell"><small>最后更新</small><strong>${formatDate(record.updatedAt)}</strong></div></div></section>
-<section><h2>二、实验目的与测量原理</h2><p>利用汞灯的已知特征谱线标定光谱图像，通过零级位置与单侧一级衍射谱线的几何关系反演光栅常数 d，并结合图像定位、拟合模型和重复测量评估结果的不确定度与可信度。</p><div class="principle"><strong>核心原理</strong><div class="formula">d sin θ = mλ　（本实验取 m = 1）</div><p>系统先提取图像横向强度、检测候选峰并匹配汞灯参考波长，再由像素几何关系联合拟合 d 与成像尺度 L。只有图像质量、可辨识性和参数边界检查通过后，结果才标记为可报告。</p></div></section>
+<section><h2>二、实验目的与测量原理</h2><p>利用汞灯的已知特征谱线测量未知光栅常数。零级参考与一级单侧谱图可分开采集：图像用于确认谱线和保留证据，分光计游标读数用于计算衍射角。</p><div class="principle"><strong>核心原理</strong><div class="formula">θᵢ = |φᵢ − φ₀|，d sin θᵢ = λᵢ　（本实验取 m = 1）</div><p>系统从一级单侧谱图提取候选峰、匹配汞灯参考波长；学生将零级和每条参与计算的一级谱线依次对准十字叉丝，填写各自的游标读数。单条谱线只生成暂估值；两条及以上谱线才能进行拟合、残差复核和不确定度评估。</p></div></section>
 <section><h2>三、原始光谱与采集质量</h2>${images ? `<div class="images">${images}</div>` : '<p class="empty">本记录没有已同步的原始光谱图片。</p>'}<div class="metrics" style="margin-top:14px"><div class="metric"><small>候选峰数量</small><strong>${formatNumber(processing.peaks, 0, " 条")}</strong></div><div class="metric"><small>曝光检查</small><strong>${checkText(processing.overexposed, "存在过曝", "曝光正常")}</strong></div><div class="metric"><small>清晰度检查</small><strong>${checkText(processing.sharpnessOk, "通过", "未通过")}</strong></div></div></section>
-<section><h2>四、谱线标定与测量数据</h2><div class="metrics"><div class="metric"><small>零级位置 x₀</small><strong>${formatNumber(result.x0 ?? state.zeroX, 2, " px")}</strong></div><div class="metric"><small>拟合成像尺度 |L|</small><strong>${numberValue(result.L) === null ? "未记录" : `${Math.abs(numberValue(result.L)!).toFixed(1)} px`}</strong></div><div class="metric"><small>匹配参考线</small><strong>${markers.length} 条</strong></div></div><h3>逐线测量与拟合残差</h3><div class="table-wrap"><table><thead><tr><th>序号</th><th>参考波长 λ</th><th>图像横向位置</th><th>换算衍射角 θ</th><th>波长残差</th></tr></thead><tbody>${markerRows || '<tr><td colspan="5" class="empty">尚无参考谱线数据</td></tr>'}</tbody></table></div></section>
-<section><h2>五、数据处理过程</h2>${steps ? `<ol class="steps">${steps}</ol>` : '<p class="empty">尚无已完成的实验步骤。</p>'}<p class="principle">处理链：原始照片读取 → 横向强度提取 → 候选峰检测 → 零级定位与参考线匹配 → 光栅模型拟合 → 残差、边界与不确定度检查 → 云端归档。</p></section>
+<section><h2>四、谱线标定与测量数据</h2><div class="metrics"><div class="metric"><small>零级游标 φ₀</small><strong>${formatNumber(result.zeroReadingDeg ?? state.zeroReadingDeg ?? zeroReference.readingDeg, 4, "°")}</strong></div><div class="metric"><small>纳入拟合的游标读数</small><strong>${formatNumber(result.lineReadingCount, 0, " 条")}</strong></div><div class="metric"><small>匹配参考线</small><strong>${markers.length} 条</strong></div></div><h3>逐线测量与拟合残差</h3><div class="table-wrap"><table><thead><tr><th>序号</th><th>参考波长 λ</th><th>图像横向位置</th><th>游标 φᵢ</th><th>衍射角 θ</th><th>波长残差</th></tr></thead><tbody>${markerRows || '<tr><td colspan="6" class="empty">尚无参考谱线数据</td></tr>'}</tbody></table></div></section>
+<section><h2>五、数据处理过程</h2>${steps ? `<ol class="steps">${steps}</ol>` : '<p class="empty">尚无已完成的实验步骤。</p>'}<p class="principle">处理链：零级参考图与 φ₀ 采集 → 一级单侧谱图读取 → 候选峰检测与参考线匹配 → 逐线 φᵢ 录入 → θᵢ 差角计算 → 光栅模型拟合 → 残差与不确定度检查 → 云端归档。</p></section>
 <section><h2>六、最终测量结果</h2><div class="metrics"><div class="metric"><small>${escapeHtml(record.resultLabel)}</small><strong>${escapeHtml(record.resultValue)}</strong></div><div class="metric"><small>光栅线密度</small><strong>${formatNumber(result.linesPerMm, 1, " 线/mm")}</strong></div><div class="metric"><small>结果质量</small><strong>${escapeHtml(record.quality)}</strong></div><div class="metric"><small>标准不确定度 uᶜ</small><strong>${formatNumber(result.standardUncertaintyUm, 4, " μm")}</strong></div><div class="metric"><small>扩展不确定度 U</small><strong>${formatNumber(result.expandedUncertaintyUm, 3, " μm")}</strong></div><div class="metric"><small>覆盖因子</small><strong>${numberValue(result.coverageFactor) === null ? "未记录" : `k = ${numberValue(result.coverageFactor)}`}</strong></div></div></section>
 <section><h2>七、不确定度分析</h2><p>各已评定标准不确定度分量按平方和合成得到 u<sub>c</sub>，再按覆盖因子计算扩展不确定度 U。未评定项目不会被解释为零不确定度。</p><div class="table-wrap"><table><thead><tr><th>不确定度来源</th><th>标准不确定度</th><th>评定状态</th></tr></thead><tbody>${budgetRows || '<tr><td colspan="3" class="empty">尚无不确定度预算</td></tr>'}</tbody></table></div></section>
-<section><h2>八、拟合质量与结果可信度</h2><div class="metrics"><div class="metric"><small>波长拟合 RMSE</small><strong>${formatNumber(result.rmseNm, 3, " nm")}</strong></div><div class="metric"><small>像素拟合 RMSE</small><strong>${formatNumber(result.rmsePx, 3, " px")}</strong></div><div class="metric"><small>d–L 相关系数</small><strong>${formatNumber(identification.correlation, 5)}</strong></div><div class="metric"><small>95% 剖面区间</small><strong>${numberValue(identification.profileLowUm) !== null && numberValue(identification.profileHighUm) !== null ? `${formatNumber(identification.profileLowUm, 3)}–${formatNumber(identification.profileHighUm, 3)} μm` : "未评定"}</strong></div><div class="metric"><small>参数边界</small><strong>${checkText(identification.boundaryHit, "命中，需复核", "未命中")}</strong></div><div class="metric"><small>可报告性</small><strong>${reportable ? "通过" : "未通过"}</strong></div></div><h3>限制与阻塞原因</h3><div class="note">${escapeHtml(limitation)}${reportable ? "" : `\n当前阻塞：${escapeHtml(blockReason)}`}</div></section>
+<section><h2>八、拟合质量与结果可信度</h2><div class="metrics"><div class="metric"><small>波长拟合 RMSE</small><strong>${formatNumber(result.rmseNm, 3, " nm")}</strong></div><div class="metric"><small>最大单线残差</small><strong>${formatNumber(result.maxResidualNm, 3, " nm")}</strong></div><div class="metric"><small>游标最小分度</small><strong>${formatNumber(state.vernierResolutionArcmin, 2, "′")}</strong></div><div class="metric"><small>95% 近似区间</small><strong>${numberValue(identification.profileLowUm) !== null && numberValue(identification.profileHighUm) !== null ? `${formatNumber(identification.profileLowUm, 3)}–${formatNumber(identification.profileHighUm, 3)} μm` : "未评定"}</strong></div><div class="metric"><small>残差阈值</small><strong>${numberValue(result.maxResidualNm) === null ? "未评定" : Math.abs(numberValue(result.maxResidualNm)!) <= 1 ? "≤ 1 nm，通过" : "> 1 nm，需复核"}</strong></div><div class="metric"><small>可报告性</small><strong>${reportable ? "通过" : "未通过"}</strong></div></div><h3>限制与阻塞原因</h3><div class="note">${escapeHtml(limitation)}${reportable ? "" : `\n当前阻塞：${escapeHtml(blockReason)}`}</div></section>
 <section><h2>九、异常诊断与复核意见</h2><div class="note">${escapeHtml(record.diagnosis || "未填写异常诊断或复核意见。")}</div></section><section><h2>十、实验结论</h2><div class="conclusion">${escapeHtml(conclusion)}</div></section>
 <p class="foot">报告依据：云端记录 ${escapeHtml(record.id)} 的最新数据。生成时间：${formatDate(Date.now())}。“未记录 / 未评定”表示对应数据未保存在本次记录中。</p></main></body></html>`;
 }

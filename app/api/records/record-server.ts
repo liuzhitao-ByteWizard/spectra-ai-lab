@@ -38,7 +38,7 @@ export function safeStringArray(value: string): string[] {
 export function safeImageKeys(value: string): Partial<Record<ExperimentImageSlot, string>> {
   const parsed = safeJsonObject(value);
   const result: Partial<Record<ExperimentImageSlot, string>> = {};
-  for (const slot of ["primary", "repeat_2", "repeat_3"] as const) {
+  for (const slot of ["zero_reference", "primary", "repeat_2", "repeat_3"] as const) {
     if (typeof parsed[slot] === "string") result[slot] = parsed[slot] as string;
   }
   return result;

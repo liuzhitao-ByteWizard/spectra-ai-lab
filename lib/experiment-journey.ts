@@ -10,6 +10,8 @@ export type ExperimentJourney = {
     exposureOk: boolean;
     sharpnessOk: boolean;
     zeroX: number | null;
+    zeroReferenceCaptured: boolean;
+    zeroReadingDeg: number | null;
     peakCount: number;
   };
   identification: {
@@ -36,7 +38,7 @@ export type ExperimentJourney = {
 
 export const emptyJourney: ExperimentJourney = {
   prelab: { source: "mercury", capturedLines: 0, dUm: null, rmseNm: null },
-  capture: { imageCount: 0, exposureOk: false, sharpnessOk: false, zeroX: null, peakCount: 0 },
+  capture: { imageCount: 0, exposureOk: false, sharpnessOk: false, zeroX: null, zeroReferenceCaptured: false, zeroReadingDeg: null, peakCount: 0 },
   identification: { matchedLines: 0, yellowDoubletResolved: false },
   inversion: {
     reportable: false, dUm: null, expandedUncertaintyUm: null, correlation: null,
