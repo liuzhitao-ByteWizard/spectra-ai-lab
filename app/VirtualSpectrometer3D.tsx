@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
@@ -58,8 +58,14 @@ type SceneRuntime = {
   stageGroup: THREE.Group;
   telescopeGroup: THREE.Group;
   beams: THREE.Group;
+  slitJaws: THREE.Mesh[];
   lamp: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   animationFrame: number;
+};
+
+type ScopeLineStyle = CSSProperties & {
+  "--scope-line-width": string;
+  "--scope-line-blur": string;
 };
 
 const MERCURY_LINES: SpectrometerLine[] = [
@@ -126,6 +132,17 @@ const normalize360 = (value: number) => ((value % 360) + 360) % 360;
 const signedAngleDelta = (to: number, from: number) => ((to - from + 540) % 360) - 180;
 const quantizeArcminute = (value: number) => Math.round(value * 60) / 60;
 
+// These shared coordinates connect the physical model, ray tracing and eyepiece.
+// φ = 0° points along the collimator-to-grating axis; positive φ follows the
+// right-hand +1 order in the scene and on the main vernier.
+const OPTICAL_AXIS_Y = 1.47;
+const OPTICAL_AXIS_Z = .03;
+const COLLIMATOR_MOUTH_X = -1.42;
+const TELESCOPE_MOUTH_X = 1.42;
+const RAY_DRAW_RADIUS = 5.25;
+const SCOPE_FIELD_HALF_ANGLE = 5.35;
+const SCOPE_FIELD_HALF_PERCENT = 34;
+
 function formatDms(value: number) {
   const normalized = normalize360(value);
   const degrees = Math.floor(normalized);
@@ -156,6 +173,41 @@ function calculateDiffractionAngle(wavelengthNm: number, linesPerMm: number, sta
   const argument = order * wavelengthNm / spacingNm - Math.sin(stage);
   if (Math.abs(argument) > 1) return null;
   return toDegrees(stage + Math.asin(argument));
+}
+
+function mechanicalAngleToSceneRotation(angle: number) {
+  return -toRadians(angle);
+}
+
+function getOpticalOffset(rayAngle: number, telescopeAxisAngle: number) {
+  return signedAngleDelta(rayAngle, telescopeAxisAngle);
+}
+
+function getRayEnd(angle: number, radius = RAY_DRAW_RADIUS) {
+  const radians = toRadians(angle);
+  return new THREE.Vector3(Math.cos(radians) * radius, OPTICAL_AXIS_Y, Math.sin(radians) * radius + OPTICAL_AXIS_Z);
+}
+
+function getSlitOptics(slitWidth: number) {
+  const openness = clamp((slitWidth - .12) / .7, 0, 1);
+  const broadening = clamp((slitWidth - .36) / .46, 0, 1);
+  const description = slitWidth < .22
+    ? "窄而清晰：通光量较低，谱线更细。"
+    : slitWidth > .56
+      ? "宽而明亮：通光量增加，谱线展宽、分辨率下降。"
+      : "推荐范围：亮度与分辨率保持平衡。";
+  return {
+    openness,
+    broadening,
+    jawGap: .04 + openness * .17,
+    incidentRadius: .007 + openness * .023,
+    outputRadius: .008 + openness * .017,
+    incidentOpacity: .12 + openness * .36,
+    throughput: .22 + openness * .78,
+    scopeLineWidth: 1.3 + openness * 4.4,
+    scopeLineBlur: broadening * 1.7,
+    description,
+  };
 }
 
 function addCylinderBetween(group: THREE.Group, start: THREE.Vector3, end: THREE.Vector3, radius: number, material: THREE.Material) {
@@ -222,6 +274,8 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   const [now, setNow] = useState(() => Date.now());
 
   const sourceProfile = LIGHT_SOURCES[lightSource];
+  const slitOptics = useMemo(() => getSlitOptics(slitWidth), [slitWidth]);
+  const telescopeAxisAngle = telescopeAngle;
   const displayedLines = useMemo(
     () => sourceProfile.lines.filter((line) => lightSource !== "mercury" || showWeak || !line.weak),
     [lightSource, showWeak, sourceProfile],
@@ -230,9 +284,9 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   const targetAngle = selectedLine ? calculateDiffractionAngle(selectedLine.wavelengthNm, linesPerMm, stageAngle, observationOrder) : null;
   const observationLabel = observationOrder === 1 ? "右侧 +1 级" : "左侧 −1 级";
   const rawReadings = useMemo(() => makeVernierReadings(telescopeAngle), [telescopeAngle]);
-  const alignmentTolerance = clamp(.035 + (1 - focus) * .26 + (1 - collimatorFocus) * .24 + Math.max(0, slitWidth - .46) * .42, .045, .28);
-  const zeroAligned = Math.abs(signedAngleDelta(telescopeAngle, 0)) <= alignmentTolerance;
-  const targetAligned = targetAngle !== null && Math.abs(signedAngleDelta(telescopeAngle, targetAngle)) <= alignmentTolerance;
+  const alignmentTolerance = clamp(.035 + (1 - focus) * .26 + (1 - collimatorFocus) * .24 + slitOptics.broadening * .2, .045, .28);
+  const zeroAligned = Math.abs(getOpticalOffset(0, telescopeAxisAngle)) <= alignmentTolerance;
+  const targetAligned = targetAngle !== null && Math.abs(getOpticalOffset(targetAngle, telescopeAxisAngle)) <= alignmentTolerance;
   const focusReady = focus >= .72 && collimatorFocus >= .72;
   const slitReady = slitWidth >= .22 && slitWidth <= .56;
   const stageReady = Math.abs(stageAngle) <= .15;
@@ -301,13 +355,13 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog("#08090e", 13, 25);
     const camera = new THREE.PerspectiveCamera(27, 1, .1, 100);
-    camera.position.set(0, 2.75, 13.4);
+    camera.position.set(0, 2.95, 15.4);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = .075;
     controls.enablePan = false;
-    controls.minDistance = 7.4;
-    controls.maxDistance = 16;
+    controls.minDistance = 8.2;
+    controls.maxDistance = 18;
     controls.maxPolarAngle = Math.PI * .48;
     controls.target.set(0, .45, 0);
 
@@ -431,9 +485,9 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       return arm;
     };
 
-    const whiteBase = addBox(scene, [12.4, .14, 5.8], [0, -.98, 0], groundMaterial);
+    const whiteBase = addBox(scene, [15.8, .14, 6.5], [0, -.98, 0], groundMaterial);
     whiteBase.receiveShadow = true;
-    addBox(scene, [12.55, .055, 5.95], [0, -1.075, 0], groundEdgeMaterial);
+    addBox(scene, [15.95, .055, 6.65], [0, -1.075, 0], groundEdgeMaterial);
 
     const instrument = new THREE.Group();
     scene.add(instrument);
@@ -510,33 +564,50 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
 
     const bench = new THREE.Group();
     instrument.add(bench);
-    addBox(bench, [6.2, .16, .32], [.05, 1.13, .32], railMetal);
-    addBox(bench, [4.9, .09, .42], [.1, 1.01, .28], baseGray);
-    addBox(bench, [.26, .84, .3], [-2.15, .67, .32], baseGray);
-    addBox(bench, [.26, .78, .3], [2.07, .69, .32], baseGray);
-    addBox(bench, [1.25, .19, .5], [-1.65, .66, .32], baseGray);
-    addBox(bench, [1.06, .19, .5], [1.55, .68, .32], baseGray);
+    addBox(bench, [8.75, .16, .32], [.05, 1.13, .32], railMetal);
+    addBox(bench, [7.45, .09, .42], [.1, 1.01, .28], baseGray);
+    addBox(bench, [.26, .84, .3], [-3.48, .67, .32], baseGray);
+    addBox(bench, [.26, .78, .3], [3.38, .69, .32], baseGray);
+    addBox(bench, [1.25, .19, .5], [-3.02, .66, .32], baseGray);
+    addBox(bench, [1.06, .19, .5], [2.86, .68, .32], baseGray);
 
     const stageGroup = new THREE.Group();
     instrument.add(stageGroup);
-    addVerticalTube(stageGroup, .46, .5, .13, [0, .93, .03], aluminum, 40);
-    addVerticalTube(stageGroup, .41, .44, .09, [0, 1.025, .03], sootBlack, 36);
-    const gratingFrame = addBox(stageGroup, [.11, .74, .7], [0, 1.38, .03], gratingMaterial);
+    // A self-contained, raised grating carriage: the photo reference shows this
+    // as a separate circular stage with a thin upright grating and clamp screws.
+    addVerticalTube(stageGroup, .5, .54, .13, [0, .93, .03], aluminum, 48);
+    addVerticalTube(stageGroup, .44, .47, .09, [0, 1.03, .03], sootBlack, 40);
+    addVerticalTube(stageGroup, .37, .4, .08, [0, 1.115, .03], baseGray, 36);
+    const gratingCarrier = new THREE.Group();
+    stageGroup.add(gratingCarrier);
+    addVerticalTube(gratingCarrier, .34, .36, .08, [0, 1.19, .03], darkGray, 32);
+    addBox(gratingCarrier, [.78, .07, .16], [0, 1.245, .03], aluminum);
+    addBox(gratingCarrier, [.13, .08, .86], [0, 1.245, .03], railMetal);
+    addBox(gratingCarrier, [.15, .075, .84], [0, 1.83, .03], aluminum);
+    addBox(gratingCarrier, [.15, .68, .075], [0, 1.52, -.38], carbon);
+    addBox(gratingCarrier, [.15, .68, .075], [0, 1.52, .44], carbon);
+    const gratingFrame = addBox(gratingCarrier, [.075, .7, .68], [0, 1.52, .03], gratingMaterial);
     gratingFrame.castShadow = true;
     const grating = new THREE.Mesh(new THREE.PlaneGeometry(.51, .56), new THREE.MeshStandardMaterial({ color: "#aab1b6", metalness: .86, roughness: .13 }));
-    grating.position.set(.061, 1.38, .03);
+    grating.position.set(.045, 1.52, .03);
     grating.rotation.y = Math.PI / 2;
-    stageGroup.add(grating);
+    gratingCarrier.add(grating);
     for (let index = -8; index <= 8; index++) {
-      const ruling = addBox(stageGroup, [.014, .51, .008], [.071, 1.38, .03 + index * .0315], rulerMaterial);
+      const ruling = addBox(gratingCarrier, [.012, .51, .008], [.053, 1.52, .03 + index * .0315], rulerMaterial);
       ruling.castShadow = false;
     }
-    addBox(stageGroup, [.65, .11, .13], [0, 1.04, .03], aluminum);
-    addVerticalTube(stageGroup, .075, .075, .58, [-.22, 1.34, .03], carbon, 18);
-    addRing(stageGroup, [-.22, 1.52, .03], .095, .022, brightMetal);
+    for (const z of [-.24, .24]) {
+      addBox(gratingCarrier, [.15, .09, .12], [-.11, 1.72, z + .03], brightMetal);
+      addVerticalTube(gratingCarrier, .05, .05, .11, [-.22, 1.72, z + .03], brightMetal, 20);
+      addRing(gratingCarrier, [-.28, 1.72, z + .03], .065, .014, carbon);
+    }
+    addBox(gratingCarrier, [.11, .055, .62], [-.16, 1.315, .03], aluminum);
+    addVerticalTube(gratingCarrier, .055, .055, .42, [-.27, 1.45, .03], carbon, 18);
+    addRing(gratingCarrier, [-.27, 1.62, .03], .08, .018, brightMetal);
 
     const lampHousing = new THREE.Group();
     instrument.add(lampHousing);
+    lampHousing.position.x = -1.32;
     addBox(lampHousing, [1.05, .34, .88], [-4.18, -.68, .05], matteBlack);
     addBox(lampHousing, [.78, 2.0, .64], [-4.18, .27, .05], sootBlack);
     addBox(lampHousing, [.88, .1, .72], [-4.18, 1.32, .05], carbon);
@@ -552,8 +623,10 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
 
     const collimator = new THREE.Group();
     instrument.add(collimator);
-    collimator.position.x = .12;
-    const opticalAxisY = 1.47;
+    // The mouth is kept outside the independent stage, leaving the same visible
+    // free-space light path as the real instrument.
+    collimator.position.x = COLLIMATOR_MOUTH_X + .22;
+    const opticalAxisY = OPTICAL_AXIS_Y;
     addHorizontalTube(collimator, .33, .33, .42, [-3.32, opticalAxisY, .03], sootBlack);
     addRing(collimator, [-3.07, opticalAxisY, .03], .36, .035, carbon);
     addHorizontalTube(collimator, .29, .29, .48, [-2.86, opticalAxisY, .03], carbon);
@@ -567,11 +640,18 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     addRing(collimator, [-.22, opticalAxisY, .03], .25, .025, darkGray);
     addBox(collimator, [.3, .76, .35], [-2.48, .83, .03], darkGray);
     addBox(collimator, [.62, .12, .46], [-2.48, .48, .03], baseGray);
+    const slitAssembly = new THREE.Group();
+    slitAssembly.position.set(-.17, opticalAxisY, .03);
+    collimator.add(slitAssembly);
+    const upperSlitJaw = addBox(slitAssembly, [.07, .18, .42], [0, .14, 0], matteBlack);
+    const lowerSlitJaw = addBox(slitAssembly, [.07, .18, .42], [0, -.14, 0], matteBlack);
+    addBox(slitAssembly, [.088, .035, .5], [-.02, .27, 0], carbon);
+    addBox(slitAssembly, [.088, .035, .5], [-.02, -.27, 0], carbon);
 
     const telescopeGroup = new THREE.Group();
     instrument.add(telescopeGroup);
     const telescopeBody = new THREE.Group();
-    telescopeBody.position.x = -.16;
+    telescopeBody.position.x = TELESCOPE_MOUTH_X - .27;
     telescopeGroup.add(telescopeBody);
     addBox(telescopeBody, [3.55, .09, .17], [2.02, 1.17, .03], carbon);
     addBox(telescopeBody, [.29, .72, .34], [1.15, .91, .03], baseGray);
@@ -626,7 +706,18 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
 
     const beams = new THREE.Group();
     instrument.add(beams);
-    const runtime: SceneRuntime = { renderer, scene, camera, controls, stageGroup, telescopeGroup, beams, lamp, animationFrame: 0 };
+    const runtime: SceneRuntime = {
+      renderer,
+      scene,
+      camera,
+      controls,
+      stageGroup,
+      telescopeGroup,
+      beams,
+      slitJaws: [upperSlitJaw, lowerSlitJaw],
+      lamp,
+      animationFrame: 0,
+    };
     runtimeRef.current = runtime;
 
     const resize = () => {
@@ -660,8 +751,11 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
-    runtime.stageGroup.rotation.y = -toRadians(stageAngle);
-    runtime.telescopeGroup.rotation.y = -toRadians(telescopeAngle);
+    runtime.stageGroup.rotation.y = mechanicalAngleToSceneRotation(stageAngle);
+    runtime.telescopeGroup.rotation.y = mechanicalAngleToSceneRotation(telescopeAxisAngle);
+    const jawCenter = .09 + slitOptics.jawGap / 2;
+    runtime.slitJaws[0].position.y = jawCenter;
+    runtime.slitJaws[1].position.y = -jawCenter;
     runtime.lamp.material.emissiveIntensity = lampOn ? 2.2 : .05;
     runtime.lamp.material.color.set(lampOn ? sourceProfile.beamColor : "#293845");
     while (runtime.beams.children.length) {
@@ -669,37 +763,40 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       if (child) disposeObject(child);
     }
     if (!lampOn || !showRays) return;
+    const gratingCenter = new THREE.Vector3(0, OPTICAL_AXIS_Y, OPTICAL_AXIS_Z);
+    const collimatorMouth = new THREE.Vector3(COLLIMATOR_MOUTH_X, OPTICAL_AXIS_Y, OPTICAL_AXIS_Z);
     if (showIncident) {
-      const incidentMaterial = new THREE.MeshBasicMaterial({ color: sourceProfile.beamColor, transparent: true, opacity: .3 });
-      addCylinderBetween(runtime.beams, new THREE.Vector3(-3.56, 1.47, .03), new THREE.Vector3(-.06, 1.47, .03), .018, incidentMaterial);
+      const incidentMaterial = new THREE.MeshBasicMaterial({ color: sourceProfile.beamColor, transparent: true, opacity: slitOptics.incidentOpacity });
+      addCylinderBetween(runtime.beams, collimatorMouth, gratingCenter, slitOptics.incidentRadius, incidentMaterial);
     }
     if (showZeroOrder && (rayDisplay === "all" || rayDisplay === "zero")) {
-      const zeroMaterial = new THREE.MeshBasicMaterial({ color: sourceProfile.beamColor, transparent: true, opacity: .25 });
-      addCylinderBetween(runtime.beams, new THREE.Vector3(.06, 1.47, .03), new THREE.Vector3(4.18, 1.47, .03), .013, zeroMaterial);
+      const zeroMaterial = new THREE.MeshBasicMaterial({ color: sourceProfile.beamColor, transparent: true, opacity: .14 + slitOptics.throughput * .24 });
+      addCylinderBetween(runtime.beams, gratingCenter, getRayEnd(0), slitOptics.outputRadius, zeroMaterial);
     }
-    const intensityFactor = clamp(.38 + focus * .28 + collimatorFocus * .26 + (slitWidth <= .56 ? .15 : 0) + Math.log2(Math.max(slitCount, 2)) * .02, .25, 1);
+    const focusTransmission = .25 + focus * .35 + collimatorFocus * .3;
+    const intensityFactor = clamp(focusTransmission * slitOptics.throughput + Math.log2(Math.max(slitCount, 2)) * .02, .08, 1);
     const visibleOrders: DiffractionOrder[] = rayDisplay === "all" ? [-1, 1] : rayDisplay === "left" ? [-1] : rayDisplay === "right" ? [1] : [];
     visibleOrders.forEach((order) => {
       displayedLines.forEach((line) => {
         const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle, order);
         if (angle === null) return;
-        const rad = toRadians(angle);
-        const end = new THREE.Vector3(Math.cos(rad) * 4.18, 1.47, Math.sin(rad) * 4.18 + .03);
+        const end = getRayEnd(angle);
         const opacity = line.intensity * intensityFactor * (line.weak ? .48 : 1) * (sourceProfile.continuous ? .54 : 1);
         const material = new THREE.MeshBasicMaterial({ color: line.color, transparent: true, opacity });
-        addCylinderBetween(runtime.beams, new THREE.Vector3(.06, 1.47, .03), end, (sourceProfile.continuous ? .014 : .011) + singleRatio * .01, material);
+        const rayRadius = slitOptics.outputRadius + (sourceProfile.continuous ? .006 : .003) + singleRatio * .006;
+        addCylinderBetween(runtime.beams, gratingCenter, end, rayRadius, material);
       });
     });
-  }, [stageAngle, telescopeAngle, lampOn, showRays, showIncident, showZeroOrder, rayDisplay, displayedLines, linesPerMm, collimatorFocus, focus, slitWidth, slitCount, singleRatio, sourceProfile]);
+  }, [stageAngle, telescopeAxisAngle, lampOn, showRays, showIncident, showZeroOrder, rayDisplay, displayedLines, linesPerMm, collimatorFocus, focus, slitCount, singleRatio, sourceProfile, slitOptics]);
 
   const setSceneView = useCallback((view: CameraView) => {
     const runtime = runtimeRef.current;
     setCameraView(view);
     if (!runtime) return;
     runtime.controls.target.set(0, .45, 0);
-    if (view === "top") runtime.camera.position.set(.05, 11.6, .08);
-    else if (view === "side") runtime.camera.position.set(0, 2.75, 13.4);
-    else runtime.camera.position.set(5.9, 3.7, 10.2);
+    if (view === "top") runtime.camera.position.set(.05, 13.2, .08);
+    else if (view === "side") runtime.camera.position.set(0, 2.95, 15.4);
+    else runtime.camera.position.set(7.1, 4.35, 12.8);
     runtime.controls.update();
   }, []);
 
@@ -866,8 +963,18 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     setLastMessage(`已选择 ${next.wavelengthNm.toFixed(2)} nm ${next.label}（${observationLabel}）。`);
   };
 
-  const scopeLinePosition = (angle: number) => 50 + signedAngleDelta(angle, telescopeAngle) * 6.2;
-  const currentTargetOffset = targetAngle === null ? null : signedAngleDelta(targetAngle, telescopeAngle);
+  const scopeLinePosition = (angle: number) => 50 + getOpticalOffset(angle, telescopeAxisAngle) * SCOPE_FIELD_HALF_PERCENT / SCOPE_FIELD_HALF_ANGLE;
+  const isRayInScope = (angle: number) => Math.abs(getOpticalOffset(angle, telescopeAxisAngle)) <= SCOPE_FIELD_HALF_ANGLE;
+  const currentTargetOffset = targetAngle === null ? null : getOpticalOffset(targetAngle, telescopeAxisAngle);
+  const targetInScope = targetAngle !== null && isRayInScope(targetAngle);
+  const makeScopeLineStyle = (angle: number, color: string, opacity: number, target = false): ScopeLineStyle => ({
+    left: `${scopeLinePosition(angle)}%`,
+    background: color,
+    color,
+    opacity,
+    "--scope-line-width": `${slitOptics.scopeLineWidth + (target ? .9 : 0)}px`,
+    "--scope-line-blur": `${slitOptics.scopeLineBlur}px`,
+  });
   const instruction = [
     "调节狭缝宽度、平行光管与目镜焦距，使谱线既清晰又足够明亮。",
     "将载物台法线调至 0°，准备以法线入射建立测量条件。",
@@ -895,14 +1002,16 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
 
       <section className="virtual-lab-shell">
         <div className="lab-scene-column">
-          <div
-            className={`webgl-stage mouse-${mouseTool}`}
-            onPointerDown={beginCanvasDrag}
-            onPointerMove={moveCanvasDrag}
-            onPointerUp={endCanvasDrag}
-            onPointerCancel={endCanvasDrag}
-          >
-            <div ref={hostRef} className="three-host" aria-label="可交互的高保真分光计三维模型" />
+          <div className={`webgl-stage mouse-${mouseTool}`}>
+            <div
+              ref={hostRef}
+              className="three-host"
+              aria-label="可交互的高保真分光计三维模型"
+              onPointerDown={beginCanvasDrag}
+              onPointerMove={moveCanvasDrag}
+              onPointerUp={endCanvasDrag}
+              onPointerCancel={endCanvasDrag}
+            />
             <div className="scene-grid" aria-hidden="true" />
             <div className="scene-badges">
               <span className={lampOn ? "is-on" : ""}><i />{sourceProfile.shortName} {lampOn ? "已开启" : "已关闭"}</span>
@@ -910,19 +1019,25 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               <span><Rotate3D size={14} />φ = {telescopeAngle.toFixed(2)}°</span>
               <span><Aperture size={14} />{rayDisplay === "all" ? "双侧 ±1 级" : rayDisplay === "left" ? "左侧 −1 级" : rayDisplay === "right" ? "右侧 +1 级" : "仅零级光"}</span>
             </div>
-            <div className="scene-actions">
-              <div className="scene-view-buttons" aria-label="三维视角">
-                <button className={cameraView === "orbit" ? "active" : ""} onClick={() => setSceneView("orbit")} title="自由三维视角"><Rotate3D size={16} /></button>
-                <button className={cameraView === "top" ? "active" : ""} onClick={() => setSceneView("top")} title="俯视刻度盘"><Layers3 size={16} /></button>
-                <button className={cameraView === "side" ? "active" : ""} onClick={() => setSceneView("side")} title="侧视光路"><Eye size={16} /></button>
+            <div className="scene-actions" aria-label="三维操作工具栏">
+              <div className="scene-action-group">
+                <span>视图预设</span>
+                <div className="scene-view-buttons" aria-label="三维视角">
+                  <button className={cameraView === "orbit" ? "active" : ""} onClick={() => setSceneView("orbit")} title="自由三维视角" aria-label="自由三维视角"><Rotate3D size={16} /></button>
+                  <button className={cameraView === "top" ? "active" : ""} onClick={() => setSceneView("top")} title="俯视刻度盘" aria-label="俯视刻度盘"><Layers3 size={16} /></button>
+                  <button className={cameraView === "side" ? "active" : ""} onClick={() => setSceneView("side")} title="侧视光路" aria-label="侧视光路"><Eye size={16} /></button>
+                </div>
               </div>
-              <div className="scene-tool-buttons" aria-label="鼠标操作对象">
-                <button className={mouseTool === "view" ? "active" : ""} onClick={() => setMouseTool("view")}><Move3D size={15} />视角</button>
-                <button className={mouseTool === "telescope" ? "active" : ""} onClick={() => setMouseTool("telescope")}><Telescope size={15} />望远镜</button>
-                <button className={mouseTool === "stage" ? "active" : ""} onClick={() => setMouseTool("stage")}><Rotate3D size={15} />载物台</button>
+              <div className="scene-action-group">
+                <span>拖拽对象</span>
+                <div className="scene-tool-buttons" aria-label="鼠标操作对象">
+                  <button className={mouseTool === "view" ? "active" : ""} onClick={() => setMouseTool("view")}><Move3D size={15} />视角</button>
+                  <button className={mouseTool === "telescope" ? "active" : ""} onClick={() => setMouseTool("telescope")}><Telescope size={15} />望远镜</button>
+                  <button className={mouseTool === "stage" ? "active" : ""} onClick={() => setMouseTool("stage")}><Rotate3D size={15} />载物台</button>
+                </div>
               </div>
             </div>
-            {showLabels && <div className="scene-part-labels" aria-hidden="true"><span className="label-lamp">{sourceProfile.shortName}光源</span><span className="label-collimator">平行光管</span><span className="label-stage">载物台光栅</span><span className="label-telescope">望远镜</span></div>}
+            {showLabels && <div className="scene-part-labels" aria-hidden="true"><span className="label-lamp">{sourceProfile.shortName}光源</span><span className="label-collimator">平行光管</span><span className="label-stage">独立光栅台</span><span className="label-telescope">望远镜</span></div>}
           </div>
 
           <div className="instrument-control-deck">
@@ -942,6 +1057,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
                 <label className="range-control"><span>光栅法线 <b>{stageAngle.toFixed(2)}°</b></span><input type="range" min="-12" max="12" step=".01" value={stageAngle} onChange={(event) => setStageAngle(Number(event.target.value))} /></label>
                 <label className="range-control"><span>望远镜 φ <b>{telescopeAngle.toFixed(2)}°</b></span><input type="range" min="-62" max="62" step=".01" value={telescopeAngle} onChange={(event) => setTelescopeAngle(Number(event.target.value))} /></label>
               </div>
+              <p className="slit-optics-note"><Aperture size={15} /><span><b>狭缝反馈：</b>{slitOptics.description}</span></p>
               <div className="vernier-adjustments" aria-label="角度微调">
                 <div className="fine-adjustment">
                   <div><span>载物台微调</span><b>{formatSignedDms(stageAngle)}</b></div>
@@ -985,16 +1101,17 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
 
         <aside className="virtual-lab-side">
           <section className="scope-card">
-            <div className="scope-card-head"><span><Eye size={17} />望远镜目镜 · {observationLabel}</span><b className={targetAligned && !sourceProfile.continuous ? "is-aligned" : ""}>{sourceProfile.continuous ? "连续谱演示" : targetAligned ? "目标已对准" : currentTargetOffset === null ? "当前谱线不可见" : `偏差 ${Math.abs(currentTargetOffset).toFixed(2)}°`}</b></div>
+            <div className="scope-card-head"><span><Eye size={17} />望远镜目镜 · {observationLabel}</span><b className={targetAligned && !sourceProfile.continuous ? "is-aligned" : ""}>{sourceProfile.continuous ? "连续谱演示" : targetAligned ? "目标已对准" : currentTargetOffset === null ? "当前谱线不可见" : !targetInScope ? `目标在视场外 ${Math.abs(currentTargetOffset).toFixed(2)}°` : `偏差 ${Math.abs(currentTargetOffset).toFixed(2)}°`}</b></div>
             <div className={`scope-screen ${!focusReady ? "is-unfocused" : ""} ${!lampOn ? "is-dark" : ""}`}>
               <span className="scope-circle" />
               <span className="scope-crosshair horizontal" /><span className="scope-crosshair vertical" />
-              {lampOn && showZeroOrder && <i className="scope-zero" style={{ left: `${scopeLinePosition(0)}%` }} />}
+              {lampOn && showZeroOrder && isRayInScope(0) && <i className="scope-zero" style={makeScopeLineStyle(0, "#ecf7ff", .28 + slitOptics.throughput * .48)} />}
               {lampOn && displayedLines.map((line) => {
                 const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle, observationOrder);
-                if (angle === null) return null;
-                const position = scopeLinePosition(angle);
-                return <i key={line.wavelengthNm} className={`scope-spectrum-line ${line.wavelengthNm === selectedLine?.wavelengthNm ? "is-target" : ""} ${sourceProfile.continuous ? "is-continuous" : ""}`} style={{ left: `${position}%`, background: line.color, color: line.color, opacity: line.intensity * (line.weak ? .55 : 1) }} />;
+                if (angle === null || !isRayInScope(angle)) return null;
+                const isTarget = line.wavelengthNm === selectedLine?.wavelengthNm;
+                const opacity = line.intensity * (line.weak ? .55 : 1) * (.28 + slitOptics.throughput * .72) * (sourceProfile.continuous ? .76 : 1);
+                return <i key={line.wavelengthNm} className={`scope-spectrum-line ${isTarget ? "is-target" : ""} ${sourceProfile.continuous ? "is-continuous" : ""}`} style={makeScopeLineStyle(angle, line.color, opacity, isTarget)} />;
               })}
               {!lampOn && <span className="scope-empty">{sourceProfile.name}未开启</span>}
               {lampOn && !focusReady && <span className="scope-quality-note">平行光管或目镜焦距未调准：谱线扩展，不能可靠读数</span>}
