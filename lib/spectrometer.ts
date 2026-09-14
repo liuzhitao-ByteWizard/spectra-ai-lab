@@ -40,6 +40,73 @@ export const SPECTRAL_LIBRARY: Record<string, SpectrumLine[]> = {
 const degToRad = (degrees: number) => (degrees * Math.PI) / 180;
 const radToDeg = (radians: number) => (radians * 180) / Math.PI;
 
+/** Solve a small, dense linear system without pulling a numerical dependency
+ * into the browser bundle. `matrix` is an augmented N × (N + 1) matrix. */
+function solveLinearSystem(matrix: number[][]) {
+  const size = matrix.length;
+  const work = matrix.map((row) => [...row]);
+  for (let pivot = 0; pivot < size; pivot++) {
+    let pivotRow = pivot;
+    for (let row = pivot + 1; row < size; row++) {
+      if (Math.abs(work[row][pivot]) > Math.abs(work[pivotRow][pivot])) pivotRow = row;
+    }
+    if (Math.abs(work[pivotRow][pivot]) < 1e-12) return null;
+    [work[pivot], work[pivotRow]] = [work[pivotRow], work[pivot]];
+    const divisor = work[pivot][pivot];
+    for (let column = pivot; column <= size; column++) work[pivot][column] /= divisor;
+    for (let row = 0; row < size; row++) {
+      if (row === pivot) continue;
+      const factor = work[row][pivot];
+      for (let column = pivot; column <= size; column++) work[row][column] -= factor * work[pivot][column];
+    }
+  }
+  return work.map((row) => row[size]);
+}
+
+type ReferenceCalibrationRow = PixelReferenceLine & { t: number; weight: number };
+type ReferenceImageModel = { x0: number; L: number; cubic: number };
+
+/**
+ * Fit the image coordinate of a known first-order line.  The optional odd
+ * cubic term is the first non-linear radial lens term around the optical
+ * axis.  Scaling t keeps this small fit numerically well conditioned.
+ */
+function fitReferenceImageModel(rows: ReferenceCalibrationRow[], includeCubic: boolean): ReferenceImageModel | null {
+  const count = includeCubic ? 3 : 2;
+  const scale = Math.max(...rows.map((row) => Math.abs(row.t)), 1e-6);
+  const matrix = Array.from({ length: count }, () => new Array(count + 1).fill(0));
+  rows.forEach((row) => {
+    const normalizedT = row.t / scale;
+    const basis = includeCubic ? [1, normalizedT, normalizedT ** 3] : [1, normalizedT];
+    for (let i = 0; i < count; i++) {
+      for (let j = 0; j < count; j++) matrix[i][j] += row.weight * basis[i] * basis[j];
+      matrix[i][count] += row.weight * basis[i] * row.x;
+    }
+  });
+  const solution = solveLinearSystem(matrix);
+  if (!solution) return null;
+  const [x0, scaledL, scaledCubic = 0] = solution;
+  const model = { x0, L: scaledL / scale, cubic: scaledCubic / scale ** 3 };
+  return Object.values(model).every(Number.isFinite) ? model : null;
+}
+
+function modelCoordinate(t: number, model: ReferenceImageModel) {
+  return model.x0 + model.L * t + model.cubic * t ** 3;
+}
+
+function invertReferenceImageCoordinate(x: number, model: ReferenceImageModel) {
+  let t = Math.abs((x - model.x0) / model.L);
+  if (!Number.isFinite(t)) return 0;
+  for (let iteration = 0; iteration < 12; iteration++) {
+    const slope = model.L + 3 * model.cubic * t ** 2;
+    if (!Number.isFinite(slope) || Math.abs(slope) < 1e-9) break;
+    const next = t - (modelCoordinate(t, model) - x) / slope;
+    if (!Number.isFinite(next)) break;
+    t = Math.max(0, Math.min(.8, next));
+  }
+  return t;
+}
+
 export function diffractionAngle(wavelengthNm: number, gratingUm = 3.333, order = 1) {
   const ratio = (order * wavelengthNm) / (gratingUm * 1000);
   return Math.abs(ratio) > 1 ? null : radToDeg(Math.asin(ratio));
@@ -107,43 +174,72 @@ export function fitGratingFromPixels(
   if (!Number.isFinite(imageWidth) || imageWidth <= 0) throw new Error("图像宽度无效");
   if (options.referenceCalibration) {
     const dNm = 3333.333;
-    const rows = valid.map((line) => ({ ...line, t: Math.tan(Math.asin(line.wavelengthNm / dNm)), weight: 1 / Math.max(line.uncertaintyPx ?? .35, .1) ** 2 }));
-    // When the zero order is outside the frame, it has already been stably
-    // inferred from these lines. Refit only the image scale around that x0.
-    // A free cubic term is not identifiable from a single-side photograph and
-    // used to turn a lens-distortion *diagnostic* into a false hard failure.
-    const calibratedX0 = zeroX;
-    const denominator = rows.reduce((sum, row) => sum + row.weight * row.t ** 2, 0);
-    if (denominator <= 1e-12) throw new Error("参考线跨度不足，无法确定单侧成像尺度");
-    const L = rows.reduce((sum, row) => sum + row.weight * row.t * (row.x - calibratedX0), 0) / denominator;
-    if (!Number.isFinite(L) || Math.abs(L) < imageWidth) throw new Error("单侧参考线跨度不足，无法稳定标定零级");
-    const predictedWavelengths = rows.map((row) => {
-      const t = (row.x - calibratedX0) / L;
-      return dNm * Math.abs(Math.sin(Math.atan(t)));
+    const rows: ReferenceCalibrationRow[] = valid.map((line) => ({
+      ...line,
+      t: Math.tan(Math.asin(line.wavelengthNm / dNm)),
+      weight: 1 / Math.max(line.uncertaintyPx ?? .35, .1) ** 2,
+    }));
+    const linearModel = fitReferenceImageModel(rows, false);
+    if (!linearModel || Math.abs(linearModel.L) < imageWidth) throw new Error("参考线跨度不足，无法确定单侧成像尺度");
+
+    // A single-side image can exhibit a small, repeatable radial bias at the
+    // blue/violet edge.  Fit the first physically meaningful odd correction,
+    // but select it only when the data support it.  This avoids using an extra
+    // degree of freedom merely to make a residual table look better.
+    const cubicModel = rows.length >= 5 ? fitReferenceImageModel(rows, true) : null;
+    const rmsPixelResidual = (model: ReferenceImageModel) => Math.sqrt(rows.reduce((sum, row) => {
+      const residual = row.x - modelCoordinate(row.t, model);
+      return sum + residual ** 2;
+    }, 0) / rows.length);
+    const linearRmsePx = rmsPixelResidual(linearModel);
+    const maxT = Math.max(...rows.map((row) => Math.abs(row.t)));
+    const cubicRmsePx = cubicModel ? rmsPixelResidual(cubicModel) : Number.POSITIVE_INFINITY;
+    const distortionRatio = cubicModel
+      ? Math.abs(cubicModel.cubic * maxT ** 3) / Math.max(Math.abs(cubicModel.L * maxT), 1)
+      : Number.POSITIVE_INFINITY;
+    const monotonicCubic = cubicModel && rows.every((row) => {
+      const slope = cubicModel.L + 3 * cubicModel.cubic * row.t ** 2;
+      return Number.isFinite(slope) && Math.sign(slope) === Math.sign(cubicModel.L) && Math.abs(slope) > imageWidth * .1;
     });
+    const cubicMateriallyImprovesFit = cubicRmsePx <= linearRmsePx * .8 && linearRmsePx - cubicRmsePx >= .35;
+    const lensCorrectionApplied = Boolean(cubicModel && Math.abs(cubicModel.L) >= imageWidth && monotonicCubic && distortionRatio <= .1 && cubicMateriallyImprovesFit);
+    const model = lensCorrectionApplied && cubicModel ? cubicModel : linearModel;
+    const calibratedX0 = model.x0;
+    const L = model.L;
+    const correctedT = rows.map((row) => invertReferenceImageCoordinate(row.x, model));
+    const predictedWavelengths = correctedT.map((t) => dNm * Math.abs(Math.sin(Math.atan(t))));
     const residualsNm = rows.map((row, index) => row.wavelengthNm - predictedWavelengths[index]);
-    const residualPx = rows.map((row) => row.x - (calibratedX0 + L * row.t));
+    const residualPx = rows.map((row) => row.x - modelCoordinate(row.t, model));
     const rmseNm = Math.sqrt(residualsNm.reduce((sum, value) => sum + value ** 2, 0) / rows.length);
     const rmsePx = Math.sqrt(residualPx.reduce((sum, value) => sum + value ** 2, 0) / rows.length);
+    const maxResidualNm = Math.max(...residualsNm.map((value) => Math.abs(value)));
     const localizationUm = Math.max(.0001, rmseNm / dNm);
     const geometryStable = rmsePx <= Math.max(5, imageWidth * .012);
+    const residualTargetMet = maxResidualNm <= 1;
     const budget = [
       { key: "zero", label: "参考线联合零级定位", standardUncertaintyUm: localizationUm, status: "已评定" },
       { key: "localization", label: "谱线亚像素定位", standardUncertaintyUm: localizationUm, status: "已评定" },
-      { key: "geometry", label: "镜头畸变诊断（不作为阻塞条件）", standardUncertaintyUm: null, status: geometryStable ? "未发现显著偏差" : "提示复核" },
+      { key: "geometry", label: lensCorrectionApplied ? "自适应径向镜头校正" : "镜头畸变诊断", standardUncertaintyUm: null, status: lensCorrectionApplied ? `已校正 · 边缘位移 ${(distortionRatio * 100).toFixed(1)}%` : geometryStable ? "未发现显著偏差" : "提示复核" },
       { key: "wavelength", label: "参考波长（uλ=0.01 nm）", standardUncertaintyUm: .0001, status: "已评定" },
       { key: "repeatability", label: "多张照片重复性", standardUncertaintyUm: null, status: "未评定" },
     ];
     const ucUm = Math.sqrt(budget.reduce((sum, item) => sum + (item.standardUncertaintyUm ?? 0) ** 2, 0));
-    const reportable = rows.length >= 4 && geometryStable;
+    const reportable = rows.length >= 4 && geometryStable && residualTargetMet;
+    const blockReason = rows.length < 4
+      ? "画外零级校准至少需要 4 条参考线"
+      : !geometryStable
+        ? "参考线位置与单侧光栅模型不一致，请核对颜色和标记顺序"
+        : !residualTargetMet
+          ? `校正后仍有谱线残差超过 1 nm（最大 ${maxResidualNm.toFixed(3)} nm），请复核标记或补充参考线`
+          : "";
     return {
       dUm: dNm / 1000, uncertaintyUm: 2 * ucUm, standardUncertaintyUm: ucUm, expandedUncertaintyUm: 2 * ucUm,
       coverageFactor: 2, uncertaintyLabel: "参考光栅约束下的校准不确定度", uncertaintyBudget: budget,
       linesPerMm: 1_000_000 / dNm, nominalDeviationPercent: 0, rmseNm, rmsePx, x0: calibratedX0, L,
-      lensBiasPx: 0, reportable, calibrationMode: true,
-      blockReason: reportable ? "" : rows.length < 4 ? "画外零级校准至少需要 4 条参考线" : "参考线位置与单侧光栅模型不一致，请核对颜色和标记顺序",
+      lensBiasPx: lensCorrectionApplied ? model.cubic * maxT ** 3 : 0, lensCorrectionApplied, reportable, calibrationMode: true,
+      blockReason,
       identifiability: { correlation: 0, profileLowUm: dNm / 1000, profileHighUm: dNm / 1000, boundaryHit: false },
-      points: rows.map((row, index) => ({ wavelengthNm: row.wavelengthNm, thetaDeg: Math.abs(radToDeg(Math.atan((row.x - calibratedX0) / L))), sinTheta: predictedWavelengths[index] / dNm, residualNm: residualsNm[index] })),
+      points: rows.map((row, index) => ({ wavelengthNm: row.wavelengthNm, thetaDeg: Math.abs(radToDeg(Math.atan(correctedT[index]))), sinTheta: predictedWavelengths[index] / dNm, residualNm: residualsNm[index] })),
     };
   }
   const lowerBound = Math.max(650, Math.max(...valid.map((line) => line.wavelengthNm)) * 1.02);
