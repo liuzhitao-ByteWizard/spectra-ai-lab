@@ -58,8 +58,6 @@ const MERCURY_LINES: MercuryLine[] = [
   { ...SPECTRAL_LIBRARY.mercury[4], label: "黄线 2" },
 ];
 
-const SYSTEM_ZERO_OFFSET = .38;
-const ECCENTRICITY = .018;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const toRadians = (value: number) => value * Math.PI / 180;
 const toDegrees = (value: number) => value * 180 / Math.PI;
@@ -83,9 +81,9 @@ function formatSignedDms(value: number) {
 }
 
 function makeVernierReadings(phiDeg: number): VernierReading {
-  const eccentric = ECCENTRICITY * Math.sin(toRadians(phiDeg * 3.1 + 27));
-  const a = quantizeArcminute(normalize360(phiDeg + SYSTEM_ZERO_OFFSET + eccentric));
-  const b = quantizeArcminute(normalize360(phiDeg + 180 + SYSTEM_ZERO_OFFSET - eccentric));
+  // Ideal spectrometer: opposed verniers use one shared reference.
+  const a = quantizeArcminute(normalize360(phiDeg));
+  const b = quantizeArcminute(normalize360(phiDeg + 180));
   const bResolved = b >= 180 ? b - 180 : b + 180;
   const mean = quantizeArcminute((a + bResolved) / 2);
   return { a, b, mean };
