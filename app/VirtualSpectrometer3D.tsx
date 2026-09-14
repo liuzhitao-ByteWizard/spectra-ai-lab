@@ -82,8 +82,8 @@ function formatSignedDms(value: number) {
 
 function makeVernierReadings(phiDeg: number): VernierReading {
   // Ideal spectrometer: opposed verniers use one shared reference.
-  const a = quantizeArcminute(normalize360(phiDeg));
-  const b = quantizeArcminute(normalize360(phiDeg + 180));
+  const a = normalize360(quantizeArcminute(phiDeg));
+  const b = normalize360(quantizeArcminute(phiDeg + 180));
   const bResolved = b >= 180 ? b - 180 : b + 180;
   const mean = quantizeArcminute((a + bResolved) / 2);
   return { a, b, mean };
