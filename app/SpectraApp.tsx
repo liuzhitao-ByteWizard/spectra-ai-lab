@@ -956,7 +956,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
 
   return <div className="module-page analysis-page">
     <FlowBanner stage="2–4 / 5 · 采集、识别与反演" navigate={navigate} />
-    <PageHeading eyebrow="实验 · 图像分析工作台" title="从两份采集证据到可复核的测量结果。" description="零级参考图与 φ₀ 单独采集；一级单侧谱图用于认线。逐线游标读数决定衍射角，图像不再反推未知光栅常数。" />
+    <PageHeading eyebrow="实验 · 图像分析工作台" title="从两份采集证据到可复核的测量结果。" description="零级参考图与游标读数 φ₀ 单独采集；一级单侧谱图用于识别、标记谱线。逐条记录一级谱线读数 φᵢ，按 θᵢ = |φᵢ − φ₀| 计算衍射角；由角度和已知波长拟合未知光栅常数，图像像素位置不参与反演。" />
     <div className="analysis-workbench">
       <aside className="panel parameter-panel"><div className="analysis-card-heading"><span><SlidersHorizontal size={18} /></span><div><h2>测量参数</h2><p>零级和一级读数来自分光计游标；图片仅负责认线、质检和留存。</p></div></div><div className="parameter-form">
         <label>游标最小分度（′）<input type="number" min=".01" max="60" step=".01" value={vernierResolutionArcmin} onChange={(event) => { const value = Number(event.target.value); setVernierResolutionArcmin(Number.isFinite(value) ? Math.min(60, Math.max(.01, value)) : 1); setAComplete(false); }} /></label>
