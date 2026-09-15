@@ -13,6 +13,11 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const localBindingConfig = {
   main: "vinext/server/fetch-handler",
+  // Sites supplies the real D1/R2 resources from .openai/hosting.json at
+  // deployment time. Keep the Worker runtime options here so a separate
+  // Pages configuration cannot override or detach those bindings.
+  compatibility_date: "2026-05-15",
+  compatibility_flags: ["nodejs_compat"],
   d1_databases: d1
     ? [
         {
