@@ -53,6 +53,7 @@ type SceneRuntime = {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
+  mainDial: THREE.Group;
   stageGroup: THREE.Group;
   telescopeGroup: THREE.Group;
   beams: THREE.Group;
@@ -140,6 +141,7 @@ const TELESCOPE_MOUTH_X = 1.42;
 const RAY_DRAW_RADIUS = 5.25;
 const SCOPE_FIELD_HALF_ANGLE = 5.35;
 const SCOPE_FIELD_HALF_PERCENT = 34;
+const SCOPE_DIRECTION_DEADBAND = .05;
 
 function formatDms(value: number) {
   const normalized = normalize360(value);
@@ -264,6 +266,11 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   const sourceProfile = LIGHT_SOURCES[lightSource];
   const slitOptics = useMemo(() => getSlitOptics(slitWidth), [slitWidth]);
   const telescopeAxisAngle = telescopeAngle;
+  const directedObservationOrder: DiffractionOrder | null = telescopeAngle > SCOPE_DIRECTION_DEADBAND
+    ? 1
+    : telescopeAngle < -SCOPE_DIRECTION_DEADBAND
+      ? -1
+      : null;
   const displayedLines = useMemo(
     () => sourceProfile.lines.filter((line) => lightSource !== "mercury" || showWeak || !line.weak),
     [lightSource, showWeak, sourceProfile],
@@ -306,6 +313,12 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       },
     });
   }, [lightSource, records.length, fit?.dUm, fit?.rmseNm, updateJourney]);
+
+  useEffect(() => {
+    if (directedObservationOrder !== null && observationOrder !== directedObservationOrder) {
+      setObservationOrder(directedObservationOrder);
+    }
+  }, [directedObservationOrder, observationOrder]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -461,8 +474,8 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const instrument = new THREE.Group();
     scene.add(instrument);
 
-    // The dial is deliberately independent from the telescope: the main scale is fixed
-    // to the base while the two verniers travel with the telescope assembly below.
+    // The two verniers are fixed to the base. The graduated dial moves under them
+    // with the telescope, matching the actual mechanical layout.
     const dialY = .84;
     const mainDial = new THREE.Group();
     instrument.add(mainDial);
@@ -639,17 +652,18 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     addVerticalTube(telescopeBody, .095, .12, .64, [3.76, 1.12, .03], sootBlack, 18);
     addRing(telescopeBody, [3.76, 1.4, .03], .115, .02, carbon);
 
+    const fixedVerniers = new THREE.Group();
+    instrument.add(fixedVerniers);
     const vernierPlateMaterial = new THREE.MeshStandardMaterial({
       color: "#e2b85f", emissive: "#4d3510", emissiveIntensity: .35, metalness: .28, roughness: .42,
       transparent: true, opacity: .96, side: THREE.DoubleSide, depthTest: false, depthWrite: false,
     });
     const vernierTickMaterial = new THREE.MeshBasicMaterial({ color: "#4d3405", depthTest: false, depthWrite: false });
-    const makeVernier = (opposite: boolean) => {
+    const makeVernier = (centerAngle: number) => {
       const vernier = new THREE.Group();
-      vernier.rotation.y = opposite ? Math.PI : 0;
-      telescopeGroup.add(vernier);
+      fixedVerniers.add(vernier);
       const sector = new THREE.Mesh(
-        new THREE.RingGeometry(1.31, 1.72, 32, 1, -.18, .36),
+        new THREE.RingGeometry(1.31, 1.72, 32, 1, centerAngle - .18, .36),
         vernierPlateMaterial,
       );
       sector.rotation.x = -Math.PI / 2;
@@ -657,7 +671,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       sector.renderOrder = 3;
       vernier.add(sector);
       for (let index = 0; index <= 10; index++) {
-        const rad = -.165 + index * .033;
+        const rad = centerAngle - .165 + index * .033;
         const length = index === 5 ? .16 : index % 2 === 0 ? .11 : .075;
         const radius = 1.69 - length / 2;
         const tick = new THREE.Mesh(new THREE.BoxGeometry(.013, .024, length), vernierTickMaterial);
@@ -667,15 +681,16 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
         vernier.add(tick);
       }
       const indexLine = new THREE.Mesh(new THREE.BoxGeometry(.43, .032, .032), new THREE.MeshBasicMaterial({ color: "#ffcb4d", depthTest: false, depthWrite: false }));
-      indexLine.position.set(1.505, dialY + .142, .03);
+      indexLine.position.set(Math.cos(centerAngle) * 1.505, dialY + .142, .03 + Math.sin(centerAngle) * 1.505);
+      indexLine.rotation.y = -centerAngle;
       indexLine.renderOrder = 5;
       vernier.add(indexLine);
       const hub = new THREE.Mesh(new THREE.CylinderGeometry(.055, .055, .035, 20), brightMetal);
-      hub.position.set(1.28, dialY + .13, .03);
+      hub.position.set(Math.cos(centerAngle) * 1.28, dialY + .13, .03 + Math.sin(centerAngle) * 1.28);
       vernier.add(hub);
     };
-    makeVernier(false);
-    makeVernier(true);
+    makeVernier(-Math.PI / 2);
+    makeVernier(Math.PI / 2);
 
     const beams = new THREE.Group();
     instrument.add(beams);
@@ -684,6 +699,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       scene,
       camera,
       controls,
+      mainDial,
       stageGroup,
       telescopeGroup,
       beams,
@@ -725,6 +741,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const runtime = runtimeRef.current;
     if (!runtime) return;
     runtime.stageGroup.rotation.y = mechanicalAngleToSceneRotation(stageAngle);
+    runtime.mainDial.rotation.y = mechanicalAngleToSceneRotation(telescopeAxisAngle);
     runtime.telescopeGroup.rotation.y = mechanicalAngleToSceneRotation(telescopeAxisAngle);
     const jawCenter = .09 + slitOptics.jawGap / 2;
     runtime.slitJaws[0].position.y = jawCenter;
@@ -916,7 +933,6 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     setLastMessage(`已选择 ${next.wavelengthNm.toFixed(2)} nm ${next.label}（${observationLabel}）。`);
   };
 
-  const getScopeAxis = (order: DiffractionOrder) => order * Math.abs(telescopeAngle);
   const scopeLinePosition = (angle: number, axisAngle: number) => 50 + getOpticalOffset(angle, axisAngle) * SCOPE_FIELD_HALF_PERCENT / SCOPE_FIELD_HALF_ANGLE;
   const isRayInScope = (angle: number, axisAngle: number) => Math.abs(getOpticalOffset(angle, axisAngle)) <= SCOPE_FIELD_HALF_ANGLE;
   const makeScopeLineStyle = (angle: number, axisAngle: number, color: string, opacity: number, target = false): ScopeLineStyle => ({
@@ -1005,10 +1021,10 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               </div>
               <div className="control-grid">
                 <label className="range-control"><span>狭缝宽度 <b>{slitWidth.toFixed(2)} mm</b></span><input type="range" min=".12" max=".82" step=".01" value={slitWidth} onChange={(event) => setSlitWidth(Number(event.target.value))} /></label>
-                <label className="range-control"><span>平行光管调焦 <b>{Math.round(collimatorFocus * 100)}%</b></span><input type="range" min=".3" max="1" step=".01" value={collimatorFocus} onChange={(event) => setCollimatorFocus(Number(event.target.value))} /></label>
+                <label className="range-control"><span>望远镜 φ <b>{telescopeAngle.toFixed(2)}°</b></span><input type="range" min="-62" max="62" step=".01" value={telescopeAngle} onChange={(event) => setTelescopeAngle(Number(event.target.value))} /></label>
                 <label className="range-control"><span>目镜调焦 <b>{Math.round(focus * 100)}%</b></span><input type="range" min=".3" max="1" step=".01" value={focus} onChange={(event) => setFocus(Number(event.target.value))} /></label>
                 <label className="range-control"><span>光栅法线 <b>{stageAngle.toFixed(2)}°</b></span><input type="range" min="-12" max="12" step=".01" value={stageAngle} onChange={(event) => setStageAngle(Number(event.target.value))} /></label>
-                <label className="range-control"><span>望远镜 φ <b>{telescopeAngle.toFixed(2)}°</b></span><input type="range" min="-62" max="62" step=".01" value={telescopeAngle} onChange={(event) => setTelescopeAngle(Number(event.target.value))} /></label>
+                <label className="range-control"><span>平行光管调焦 <b>{Math.round(collimatorFocus * 100)}%</b></span><input type="range" min=".3" max="1" step=".01" value={collimatorFocus} onChange={(event) => setCollimatorFocus(Number(event.target.value))} /></label>
               </div>
               <p className="slit-optics-note"><Aperture size={15} /><span><b>狭缝反馈：</b>{slitOptics.description}</span></p>
               <div className="vernier-adjustments" aria-label="角度微调">
@@ -1038,39 +1054,48 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
 
         <aside className="virtual-lab-side">
           <section className="scope-card">
-            <div className="scope-card-head"><span><Eye size={17} />双侧望远镜目镜</span><b>−1 级 / +1 级同步显示</b></div>
+            <div className="scope-card-head"><span><Eye size={17} />双侧望远镜目镜</span><b>{directedObservationOrder === null ? "φ=0° · 双零级参考" : `单镜筒 · ${directedObservationOrder === 1 ? "右侧 +1 级" : "左侧 −1 级"}`}</b></div>
             <div className="dual-scope-grid">
               {([-1, 1] as DiffractionOrder[]).map((order) => {
-                const axisAngle = getScopeAxis(order);
+                const axisAngle = telescopeAxisAngle;
+                const panelAvailable = directedObservationOrder === null || directedObservationOrder === order;
+                const showSpectrum = panelAvailable && directedObservationOrder !== null;
                 const sideTargetAngle = selectedLine ? calculateDiffractionAngle(selectedLine.wavelengthNm, linesPerMm, stageAngle, order) : null;
                 const sideTargetOffset = sideTargetAngle === null ? null : getOpticalOffset(sideTargetAngle, axisAngle);
                 const sideTargetInScope = sideTargetAngle !== null && isRayInScope(sideTargetAngle, axisAngle);
                 const sideLabel = order === -1 ? "左侧 −1 级" : "右侧 +1 级";
-                const sideAligned = sideTargetOffset !== null && Math.abs(sideTargetOffset) <= alignmentTolerance;
-                const sideStatus = sourceProfile.continuous
-                  ? "连续谱"
-                  : sideTargetAngle === null
-                    ? "当前谱线不可见"
-                    : sideAligned
-                      ? "目标已对准"
-                      : sideTargetInScope
-                        ? `偏差 ${Math.abs(sideTargetOffset ?? 0).toFixed(2)}°`
-                        : `视场外 ${Math.abs(sideTargetOffset ?? 0).toFixed(2)}°`;
-                return <div key={order} className={`scope-panel ${observationOrder === order ? "is-selected" : ""}`}>
-                  <button className="scope-side-head" onClick={() => selectObservationOrder(order)} aria-pressed={observationOrder === order}><span>{sideLabel}</span><b className={sideAligned && !sourceProfile.continuous ? "is-aligned" : ""}>{sideStatus}</b></button>
-                  <div className={`scope-screen ${!focusReady ? "is-unfocused" : ""} ${!lampOn ? "is-dark" : ""}`}>
-                    <span className="scope-circle" />
-                    <span className="scope-crosshair horizontal" /><span className="scope-crosshair vertical" />
-                    {lampOn && isRayInScope(0, axisAngle) && <i className="scope-zero" style={makeScopeLineStyle(0, axisAngle, "#ecf7ff", .28 + slitOptics.throughput * .48)} />}
-                    {lampOn && displayedLines.map((line) => {
-                      const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle, order);
-                      if (angle === null || !isRayInScope(angle, axisAngle)) return null;
-                      const isTarget = line.wavelengthNm === selectedLine?.wavelengthNm;
-                      const opacity = line.intensity * (line.weak ? .55 : 1) * (.28 + slitOptics.throughput * .72) * (sourceProfile.continuous ? .76 : 1);
-                      return <i key={line.wavelengthNm} className={`scope-spectrum-line ${isTarget ? "is-target" : ""} ${sourceProfile.continuous ? "is-continuous" : ""}`} style={makeScopeLineStyle(angle, axisAngle, line.color, opacity, isTarget)} />;
-                    })}
-                    {!lampOn && <span className="scope-empty">{sourceProfile.name}未开启</span>}
-                    {lampOn && !focusReady && <span className="scope-quality-note">焦距未调准</span>}
+                const sideAligned = panelAvailable && directedObservationOrder !== null && sideTargetOffset !== null && Math.abs(sideTargetOffset) <= alignmentTolerance;
+                const sideStatus = !panelAvailable
+                  ? "镜筒未朝向此侧"
+                  : directedObservationOrder === null
+                    ? "零级参考"
+                    : sourceProfile.continuous
+                      ? "连续谱"
+                      : sideTargetAngle === null
+                        ? "当前谱线不可见"
+                        : sideAligned
+                          ? "目标已对准"
+                          : sideTargetInScope
+                            ? `偏差 ${Math.abs(sideTargetOffset ?? 0).toFixed(2)}°`
+                            : `视场外 ${Math.abs(sideTargetOffset ?? 0).toFixed(2)}°`;
+                return <div key={order} className={`scope-panel ${observationOrder === order ? "is-selected" : ""} ${!panelAvailable ? "is-unavailable" : ""}`}>
+                  <button className="scope-side-head" onClick={() => selectObservationOrder(order)} aria-pressed={observationOrder === order} disabled={!panelAvailable}><span>{sideLabel}</span><b className={sideAligned && !sourceProfile.continuous ? "is-aligned" : ""}>{sideStatus}</b></button>
+                  <div className={`scope-screen ${!focusReady ? "is-unfocused" : ""} ${!lampOn ? "is-dark" : ""} ${!panelAvailable ? "is-unavailable" : ""}`}>
+                    <div className="scope-optical-field">
+                      <span className="scope-circle" />
+                      <span className="scope-crosshair horizontal" /><span className="scope-crosshair vertical" />
+                      {lampOn && panelAvailable && isRayInScope(0, axisAngle) && <i className="scope-zero" style={makeScopeLineStyle(0, axisAngle, "#ecf7ff", .28 + slitOptics.throughput * .48)} />}
+                      {lampOn && showSpectrum && displayedLines.map((line) => {
+                        const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle, order);
+                        if (angle === null || !isRayInScope(angle, axisAngle)) return null;
+                        const isTarget = line.wavelengthNm === selectedLine?.wavelengthNm;
+                        const opacity = line.intensity * (line.weak ? .55 : 1) * (.28 + slitOptics.throughput * .72) * (sourceProfile.continuous ? .76 : 1);
+                        return <i key={line.wavelengthNm} className={`scope-spectrum-line ${isTarget ? "is-target" : ""} ${sourceProfile.continuous ? "is-continuous" : ""}`} style={makeScopeLineStyle(angle, axisAngle, line.color, opacity, isTarget)} />;
+                      })}
+                      {!lampOn && panelAvailable && <span className="scope-empty">{sourceProfile.name}未开启</span>}
+                      {lampOn && panelAvailable && !focusReady && <span className="scope-quality-note">焦距未调准</span>}
+                    </div>
+                    {!panelAvailable && <span className="scope-unavailable">镜筒未朝向此侧</span>}
                   </div>
                 </div>;
               })}
