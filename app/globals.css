@@ -331,19 +331,20 @@ h1 { margin: 0; max-width: 760px; font-size: clamp(25px, 3vw, 38px); line-height
 .evidence-list p svg { flex: none; color: #1972e8; }
 .evidence-list > small { display: block; margin-top: 10px; color: #7f90a3; font-size: 12px; line-height: 1.6; }
 
-.guide-grid { display: grid; grid-template-columns: 224px minmax(0, 1fr) 270px; gap: 18px; align-items: start; }
-.step-list { padding: 12px 10px; }
-.step-list button { width: 100%; min-height: 61px; position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 10px; padding: 7px 9px; text-align: left; color: #557087; background: transparent; border: 0; border-radius: 10px; }
-.step-list button:not(:last-child)::after { content: ""; position: absolute; z-index: 0; top: 42px; bottom: -10px; left: 25px; width: 1px; background: #dbe5ee; }
-.step-list button:hover { background: #f4f8fc; }
-.step-list button.active { color: #125ebd; background: #edf5ff; box-shadow: inset 3px 0 #2580ef; }
-.step-node { position: relative; z-index: 1; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid #cbd9e6; border-radius: 50%; background: white; font-size: 12px; font-weight: 800; }
-.step-list button.active .step-node { color: white; border-color: #1470ea; background: #1470ea; box-shadow: 0 0 0 4px #dcecff; }
+.guide-grid { display: grid; grid-template-columns: 238px minmax(0, 1fr) 270px; gap: 18px; align-items: start; }
+.step-list.panel { padding: 4px 0; background: transparent; border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
+.step-list button { width: 100%; min-height: 50px; position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 10px; padding: 6px 8px; text-align: left; color: #60758a; background: transparent; border: 0; border-radius: 9px; }
+.step-list button:not(:last-child)::after { content: ""; position: absolute; z-index: 0; top: 36px; bottom: -8px; left: 22px; width: 1px; background: #d8e2ec; }
+.step-list button:hover, .step-list button.selected { background: #f4f8fc; }
+.step-list button.selected { box-shadow: inset 2px 0 #b9d9ff; }
+.step-node { position: relative; z-index: 1; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid #cbd9e6; border-radius: 50%; background: white; font-size: 12px; font-weight: 800; }
+.step-list button.current .step-node { color: white; border-color: #1470ea; background: #1470ea; box-shadow: 0 0 0 4px #e1efff; }
 .step-list button.done .step-node { color: #21804b; border-color: #bee5ce; background: #eaf8f0; }
-.step-summary { min-width: 0; position: relative; z-index: 1; }
-.step-list strong { display: block; overflow: hidden; font-size: 14px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.step-list small { display: block; overflow: hidden; margin-top: 3px; color: #7f8fa1; font-size: 12px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.step-list button.active small { color: #4e78a4; }
+.step-summary { min-width: 0; position: relative; z-index: 1; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.step-list strong { display: block; min-width: 0; color: #314f6a; font-size: 14px; line-height: 1.4; font-weight: 700; white-space: nowrap; }
+.step-list small { flex: none; display: block; color: #8b9bad; font-size: 12px; line-height: 1.4; white-space: nowrap; }
+.step-list button.current strong, .step-list button.current small { color: #1268d4; }
+.step-list button.done small { color: #348158; }
 .guide-detail { overflow: hidden; }
 .guide-visual { min-height: 300px; position: relative; margin: 0; overflow: hidden; background: #071628; }
 .guide-visual img { object-fit: cover; transition: opacity .25s ease; }
@@ -357,6 +358,7 @@ h1 { margin: 0; max-width: 760px; font-size: clamp(25px, 3vw, 38px); line-height
 .guide-copy h2 { margin: 0; font-size: 26px; } .guide-copy > p:not(.eyebrow) { color: #566d84; font-size: 16px; line-height: 1.8; }
 .checkpoint { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; padding: 13px; border: 1px solid #cfe0f2; border-radius: 11px; color: #1c6ccd; background: #eff6ff; }
 .checkpoint strong { display: block; font-size: 13px; } .checkpoint span { display: block; margin-top: 3px; color: #55718d; font-size: 14px; line-height: 1.6; }
+.guide-preview-note { margin: 14px 0 0; color: #6b7f92 !important; font-size: 13px !important; line-height: 1.65 !important; }
 .guide-actions { display: flex; justify-content: space-between; margin-top: 22px; }
 .guide-side { padding: 18px; }
 .guide-side > div:first-child { color: #405c76; }
@@ -639,9 +641,9 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
   .analysis-pipeline { grid-template-columns: 1fr 1fr; }
   .analysis-summary { min-height: 60px; }
   .sim-grid, .guide-grid { grid-template-columns: 1fr; } .guide-side { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  .step-list { order: -1; display: flex; gap: 9px; overflow-x: auto; padding: 12px; scrollbar-width: none; overscroll-behavior-inline: contain; scroll-snap-type: inline proximity; }
+  .step-list.panel { order: -1; display: flex; gap: 9px; overflow-x: auto; padding: 8px 2px 12px; scrollbar-width: none; overscroll-behavior-inline: contain; scroll-snap-type: inline proximity; }
   .step-list::-webkit-scrollbar { display: none; }
-  .step-list button { flex: 0 0 230px; min-height: 64px; scroll-snap-align: start; }
+  .step-list button { flex: 0 0 236px; min-height: 52px; scroll-snap-align: start; }
   .step-list button:not(:last-child)::after { top: 31px; right: -9px; bottom: auto; left: auto; width: 9px; height: 1px; }
   .assistant-grid { grid-template-columns: 250px minmax(0, 1fr); }
   .analysis-workbench { grid-template-columns: 280px minmax(0, 1fr); }
@@ -660,7 +662,7 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
   .pain-grid { grid-template-columns: 1fr; }
   .assistant-grid, .records-grid { grid-template-columns: 1fr; } .question-bank { display: none; }
   .compare-layout { grid-template-columns: 1fr; } .table-row { grid-template-columns: 1.2fr .9fr .9fr .65fr; padding-inline: 8px; }
-  .guide-side { grid-template-columns: 1fr; } .step-list { margin-inline: -1px; } .step-list button { flex-basis: min(230px, calc(100vw - 54px)); } .calibration-stats { grid-template-columns: 1fr; }
+  .guide-side { grid-template-columns: 1fr; } .step-list.panel { margin-inline: -1px; } .step-list button { flex-basis: min(236px, calc(100vw - 54px)); } .calibration-stats { grid-template-columns: 1fr; }
   .instrument-base { transform: scale(.76) rotateX(61deg) rotateZ(-12deg); }
   .analysis-workbench { grid-template-columns: 1fr; }.parameter-panel { position: static; }.parameter-form { grid-template-columns: 1fr 1fr; }.parameter-reset { align-self: end; }
   .zero-reference-card { grid-template-columns: 1fr; }
