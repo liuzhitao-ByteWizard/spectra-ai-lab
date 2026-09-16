@@ -823,7 +823,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       const stepSize = event.altKey ? .01 : .1;
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
-        const delta = event.key === "ArrowLeft" ? -stepSize : stepSize;
+        const delta = event.key === "ArrowLeft" ? stepSize : -stepSize;
         if (event.shiftKey) nudgeStage(delta); else nudgeTelescope(delta);
       }
     };
@@ -842,7 +842,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     if (!dragRef.current.active) return;
     const delta = (event.clientX - dragRef.current.x) * .12;
     dragRef.current.x = event.clientX;
-    if (mouseTool === "telescope") nudgeTelescope(delta);
+    if (mouseTool === "telescope") nudgeTelescope(-delta);
     else nudgeStage(delta * .32);
   };
   const endCanvasDrag = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -953,7 +953,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     setLastMessage(`已选择 ${next.wavelengthNm.toFixed(2)} nm ${next.label}（${observationLabel}）。`);
   };
 
-  const scopeLinePosition = (angle: number, axisAngle: number) => 50 + getOpticalOffset(angle, axisAngle) * SCOPE_FIELD_HALF_PERCENT / SCOPE_FIELD_HALF_ANGLE;
+  const scopeLinePosition = (angle: number, axisAngle: number) => 50 - getOpticalOffset(angle, axisAngle) * SCOPE_FIELD_HALF_PERCENT / SCOPE_FIELD_HALF_ANGLE;
   const isRayInScope = (angle: number, axisAngle: number) => Math.abs(getOpticalOffset(angle, axisAngle)) <= SCOPE_FIELD_HALF_ANGLE;
   const makeScopeLineStyle = (angle: number, axisAngle: number, color: string, opacity: number, target = false): ScopeLineStyle => ({
     left: `${scopeLinePosition(angle, axisAngle)}%`,
@@ -1058,7 +1058,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               </div>
               <div className="control-grid">
                 <label className="range-control"><span>狭缝宽度 <b>{slitWidth.toFixed(2)} mm</b></span><input type="range" min=".12" max=".82" step=".01" value={slitWidth} onChange={(event) => setSlitWidth(Number(event.target.value))} /></label>
-                <label className="range-control"><span>望远镜 φ <b>{telescopeAngle.toFixed(2)}°</b></span><input type="range" min="-62" max="62" step=".01" value={telescopeAngle} onChange={(event) => setTelescopeAngle(Number(event.target.value))} /></label>
+                <label className="range-control"><span>望远镜 φ <b>{telescopeAngle.toFixed(2)}°</b></span><input type="range" min="-62" max="62" step=".01" value={-telescopeAngle} onChange={(event) => setTelescopeAngle(-Number(event.target.value))} /></label>
                 <label className="range-control"><span>目镜调焦 <b>{Math.round(focus * 100)}%</b></span><input type="range" min=".3" max="1" step=".01" value={focus} onChange={(event) => setFocus(Number(event.target.value))} /></label>
                 <label className="range-control"><span>光栅法线 <b>{stageAngle.toFixed(2)}°</b></span><input type="range" min="-12" max="12" step=".01" value={stageAngle} onChange={(event) => setStageAngle(Number(event.target.value))} /></label>
                 <label className="range-control"><span>平行光管调焦 <b>{Math.round(collimatorFocus * 100)}%</b></span><input type="range" min=".3" max="1" step=".01" value={collimatorFocus} onChange={(event) => setCollimatorFocus(Number(event.target.value))} /></label>

@@ -454,13 +454,15 @@ function SimulatorModule({ journey, navigate, updateJourney }: { journey: Experi
   return <VirtualSpectrometer3D journey={journey} navigate={navigate} updateJourney={updateJourney} />;
 }
 
+const OPENMAIC_URL = process.env.NEXT_PUBLIC_OPENMAIC_URL || "http://localhost:3001";
+
 function AssistantModule({ journey, navigate }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void }) {
   const [iframeKey, setIframeKey] = useState(0);
   return <div className="openmaic-fullscreen">
     <iframe
       key={iframeKey}
       className="openmaic-iframe-full"
-      src="http://localhost:3001"
+      src={OPENMAIC_URL}
       title="SPECTRA 互动课堂"
       allow="microphone; camera; autoplay; fullscreen; clipboard-write"
     />

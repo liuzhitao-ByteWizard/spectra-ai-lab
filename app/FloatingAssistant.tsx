@@ -65,7 +65,10 @@ function FloatingAssistant({ journey, authenticated }: { journey: ExperimentJour
 
   const onContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    setMenu({ x: e.clientX, y: e.clientY });
+    const menuW = 150, menuH = 80;
+    const x = Math.min(e.clientX, window.innerWidth - menuW - 8);
+    const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
+    setMenu({ x: Math.max(8, x), y: Math.max(8, y) });
   }, []);
 
   const handleBtnClick = useCallback(() => {
