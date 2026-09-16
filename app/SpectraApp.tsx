@@ -7,7 +7,7 @@ import {
   CheckCircle2, ChevronRight, CircleAlert, CircleHelp, ClipboardCheck, Clock3,
   Download, FileText, FlaskConical, History, Home,
   Lightbulb, ListChecks, LogIn, LogOut, MessageCircle, Microscope, Play, RotateCcw, Save,
-  ScanLine, Send, SlidersHorizontal, Target, Telescope, Upload, Waves,
+  ScanLine, Send, SlidersHorizontal, Target, Telescope, Upload, Users, Waves,
 } from "lucide-react";
 import { toast } from "sonner";
 import Image from "next/image";
@@ -15,6 +15,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { Progress } from "@/components/ui/progress";
 import AssistantAnswer from "./AssistantAnswer";
 import AuroraField from "./AuroraField";
+import FloatingAssistant from "./FloatingAssistant";
 import {
   measureGrating,
   SPECTRAL_LIBRARY,
@@ -48,7 +49,7 @@ const navItems: { id: ModuleId; label: string; icon: typeof Home }[] = [
   { id: "guide", label: "实验引导", icon: ListChecks },
   { id: "simulator", label: "虚拟分光计", icon: Telescope },
   { id: "analysis", label: "图像分析", icon: ScanLine },
-  { id: "assistant", label: "AI 助教", icon: Bot },
+  { id: "assistant", label: "互动课堂", icon: Users },
   { id: "records", label: "实验记录", icon: History },
 ];
 
@@ -453,23 +454,20 @@ function SimulatorModule({ journey, navigate, updateJourney }: { journey: Experi
   return <VirtualSpectrometer3D journey={journey} navigate={navigate} updateJourney={updateJourney} />;
 }
 
-function AssistantModule({ journey, navigate, authenticated, authHref }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void; authenticated: boolean; authHref: string | null }) {
-  const [question, setQuestion] = useState("");
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string; source?: string }[]>([{ role: "assistant", text: "你好，我是你的 AI 助教。我重点辅导分光计与光栅实验，也可以帮助你理解课程知识、润色文字和分析编程问题。直接告诉我你现在遇到的困难。", source: "AI 助教 · 物理实验与通用问答" }]);
-  const [sending, setSending] = useState(false);
-  const ask = async (preset?: string) => {
-    if (!authenticated) return toast.info("登录后即可使用 AI 助教");
-    const value = (preset ?? question).trim(); if (!value || sending) return;
-    setMessages((items) => [...items, { role: "user", text: value }]); setQuestion(""); setSending(true);
-    const context = `当前实验状态：预习${journey.prelab.capturedLines >= 2 ? "已完成" : "未完成"}；照片${journey.capture.imageCount}张，曝光${journey.capture.exposureOk ? "通过" : "未通过"}，清晰度${journey.capture.sharpnessOk ? "通过" : "未通过"}；零级参考${journey.capture.zeroReferenceCaptured ? "已上传" : "未上传"}，φ₀${journey.capture.zeroReadingDeg ?? "未填写"}°；匹配参考线${journey.identification.matchedLines}条；反演${journey.inversion.reportable ? "可报告" : `被阻塞：${journey.inversion.blockReason}` }。助教只能解释，不能更改完成状态。`;
-    try { const response = await fetch("/api/ai/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: `${context}\n\n学生问题：${value}` }) }); const data = await response.json() as { answer?: string; sources?: string[]; error?: string }; if (!response.ok || !data.answer) throw new Error(data.error || "AI 助教暂时不可用"); setMessages((items) => [...items, { role: "assistant", text: data.answer!, source: data.sources?.[0] }]); }
-    catch (error) { setMessages((items) => [...items, { role: "assistant", text: error instanceof Error ? error.message : "AI 助教暂时不可用，请稍后重试。", source: "系统提示" }]); }
-    finally { setSending(false); }
-  };
-  return <div className="module-page"><FlowBanner stage="实验助教 · 只读当前流程数据" navigate={navigate} /><PageHeading eyebrow="AI 助教 · 当前实验上下文" title="分析实验现象，帮你理清下一步。" description={`当前匹配 ${journey.identification.matchedLines} 条参考线；${journey.inversion.reportable ? "反演结果已通过检查" : journey.inversion.blockReason}`} />
-    {!authenticated && <p className="auth-notice">请先完成登录后使用 AI 助教并保存个人实验记录。{authHref && <> <a href={authHref} target="_top">登录 ChatGPT</a></>}</p>}
-    <div className="assistant-grid"><aside className="question-bank panel"><div className="panel-title"><div><span className="step-index"><BookOpen size={15} /></span><h2>试试这样问</h2></div></div><div className="quick-questions">{["为什么黄光是两条？", "帮我制定一份复习计划", "解释一个陌生概念", "帮我润色一段文字", "给我一个编程思路"].map((text) => <button key={text} onClick={() => ask(text)}><MessageCircle size={15} />{text}<ChevronRight size={15} /></button>)}</div><div className="knowledge-scope"><strong>能力范围</strong><span>分光计实验</span><span>物理实验</span><span>课程答疑</span><span>写作润色</span><span>编程分析</span></div></aside>
-      <section className="chat-panel panel"><div className="chat-status"><span><i />{authenticated ? "AI 助教在线" : "登录后启用 AI 助教"}</span><em>物理实验 · 通用问答</em></div><div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}><span>{message.role === "assistant" ? <Bot size={17} /> : "你"}</span><div>{message.role === "assistant" ? <AssistantAnswer>{message.text}</AssistantAnswer> : <p>{message.text}</p>}{message.source && <small><BookOpen size={12} />{message.source}</small>}</div></div>)}{sending && <div className="message assistant"><span><Bot size={17} /></span><div><p>AI 助教正在分析问题…</p></div></div>}</div><form className="chat-input" onSubmit={(e) => { e.preventDefault(); ask(); }}><textarea value={question} onChange={(e) => setQuestion(e.target.value)} disabled={!authenticated} placeholder={authenticated ? "问分光计实验、课程、写作、编程或日常问题…" : "登录后即可提问"} /><button type="submit" aria-label="发送问题" disabled={!authenticated}><Send size={18} /></button></form><p className="chat-hint">AI 可能出错，重要信息请结合可靠来源核实。</p></section></div>
+function AssistantModule({ journey, navigate }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void }) {
+  const [iframeKey, setIframeKey] = useState(0);
+  return <div className="openmaic-fullscreen">
+    <iframe
+      key={iframeKey}
+      className="openmaic-iframe-full"
+      src="http://localhost:3001"
+      title="SPECTRA 互动课堂"
+      allow="microphone; camera; autoplay; fullscreen; clipboard-write"
+    />
+    <button className="openmaic-back-btn" onClick={() => navigate("home")} aria-label="返回主站">
+      <ArrowLeft size={18} />
+      <span>返回主站</span>
+    </button>
   </div>;
 }
 
@@ -1124,5 +1122,5 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} authenticated={authenticated} authHref={authHref} authLabel={authLabel} viewerName={viewerName} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} authenticated={authenticated} authHref={authHref} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} navigate={setActive} updateJourney={updateJourney} authenticated={authenticated} finishExperiment={resetExperiment} />}{active === "guide" && <GuideModule journey={journey} navigate={setActive} />}{active === "records" && <RecordsModule navigate={setActive} authenticated={authenticated} authHref={authHref} />}<footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer><Toaster position="top-center" richColors /></main>;
+  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}>{active !== "assistant" && <AppHeader active={active} onChange={setActive} authenticated={authenticated} authHref={authHref} authLabel={authLabel} viewerName={viewerName} />}{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} navigate={setActive} updateJourney={updateJourney} authenticated={authenticated} finishExperiment={resetExperiment} />}{active === "guide" && <GuideModule journey={journey} navigate={setActive} />}{active === "records" && <RecordsModule navigate={setActive} authenticated={authenticated} authHref={authHref} />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
 }

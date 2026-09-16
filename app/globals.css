@@ -695,3 +695,200 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
   .module-page, .module-ambient::before, .module-ambient::after, .analysis-scan, .hero-scroll-cue i::after { animation: none !important; }
   .aurora-field, .hero-copy, .analysis-float, .home-module .pain-grid { transition: none !important; }
 }
+
+/* === OpenMAIC 互动课堂 === */
+.openmaic-fullscreen { position: fixed; inset: 0; z-index: 40; background: #fff; }
+.openmaic-iframe-full { display: block; width: 100%; height: 100%; border: 0; }
+.openmaic-back-btn {
+  position: fixed; top: 16px; left: 16px; z-index: 50;
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255,255,255,.2); border-radius: 10px;
+  color: #fff; background: rgba(7, 23, 44, .75);
+  backdrop-filter: blur(8px);
+  font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  transition: background .2s;
+}
+.openmaic-back-btn:hover { background: rgba(7, 23, 44, .92); }
+
+/* === 浮动 AI 助教小人 === */
+.floating-assistant-btn {
+  position: fixed; bottom: 24px; right: 24px; z-index: 90;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0; border: 0; background: transparent; cursor: pointer;
+}
+.floating-assistant-face {
+  display: grid; place-items: center;
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #1e1b4b, #0f172a);
+  box-shadow: 0 4px 20px rgba(139, 92, 246, .35), 0 0 24px rgba(34, 211, 238, .15);
+  transition: transform .2s, box-shadow .2s;
+  animation: float-bob 3s ease-in-out infinite;
+}
+.floating-assistant-btn:hover .floating-assistant-face {
+  transform: scale(1.08);
+  box-shadow: 0 6px 28px rgba(139, 92, 246, .5), 0 0 32px rgba(34, 211, 238, .25);
+}
+.floating-assistant-tip {
+  padding: 5px 10px;
+  border-radius: 8px;
+  color: #fff;
+  background: linear-gradient(135deg, rgba(139,92,246,.9), rgba(34,211,238,.85));
+  font-size: 12px; font-weight: 600;
+  white-space: nowrap;
+  opacity: 0; transform: translateX(4px);
+  transition: opacity .2s, transform .2s;
+  pointer-events: none;
+}
+.floating-assistant-btn:hover .floating-assistant-tip { opacity: 1; transform: translateX(0); }
+.floating-assistant-btn.dragging { cursor: grabbing; }
+.floating-assistant-btn.dragging .floating-assistant-face { animation: none; transform: scale(1.1); }
+.floating-assistant-btn.dragging .floating-assistant-tip { opacity: 0; }
+@keyframes float-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+/* 浮动聊天面板 */
+.floating-chat-panel {
+  position: fixed; bottom: 88px; right: 24px; z-index: 91;
+  width: 360px; max-height: 480px;
+  display: flex; flex-direction: column;
+  border: 1px solid #d0ddec; border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(15, 40, 70, .18);
+  overflow: hidden;
+  animation: panel-in .22s ease-out;
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(10px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.floating-chat-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #1e1b4b, #312e81);
+  color: #fff;
+}
+.floating-chat-title { display: flex; align-items: center; gap: 9px; }
+.floating-chat-avatar-sm {
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: rgba(255,255,255,.15);
+}
+.aura-avatar-sm { background: rgba(139,92,246,.3); }
+.floating-chat-title strong { display: block; font-size: 14px; }
+.floating-chat-title small { font-size: 11px; opacity: .8; }
+.floating-chat-close {
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 8px;
+  color: #fff; background: rgba(255,255,255,.15);
+  cursor: pointer;
+}
+.floating-chat-close:hover { background: rgba(255,255,255,.28); }
+.floating-chat-messages {
+  flex: 1; overflow-y: auto;
+  padding: 14px;
+  background: linear-gradient(#fbfdff, #f4f8fc);
+  min-height: 220px; max-height: 310px;
+}
+.floating-msg { display: flex; margin-bottom: 12px; }
+.floating-msg.user { justify-content: flex-end; }
+.floating-msg-bubble {
+  max-width: 85%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 13px; line-height: 1.65;
+  color: #28425d;
+  background: #fff;
+  border: 1px solid #dde7f0;
+  box-shadow: 0 2px 8px #17375708;
+}
+.floating-msg.user .floating-msg-bubble {
+  color: #fff; background: #1670ea; border-color: #1670ea;
+  border-radius: 12px 4px 12px 12px;
+}
+.floating-msg.assistant .floating-msg-bubble { border-radius: 4px 12px 12px 12px; }
+.floating-msg-bubble p { margin: 0; }
+.floating-msg-bubble small { display: block; margin-top: 6px; color: #7f91a5; font-size: 11px; }
+.floating-msg.user .floating-msg-bubble small { color: rgba(255,255,255,.7); }
+.floating-msg-bubble .assistant-markdown { font-size: 13px; line-height: 1.65; }
+.floating-msg-bubble .assistant-markdown p { margin: 0 0 6px; }
+.floating-msg-bubble .assistant-markdown > :last-child { margin-bottom: 0; }
+.floating-msg-bubble .assistant-markdown ul,
+.floating-msg-bubble .assistant-markdown ol { margin: 6px 0; padding-left: 1.3rem; }
+.floating-msg-bubble .assistant-markdown ul { list-style: disc; }
+.floating-msg-bubble .assistant-markdown ol { list-style: decimal; }
+.floating-msg-bubble .assistant-markdown strong { color: #183d62; }
+.floating-msg-bubble .assistant-markdown a { color: #0969da; text-decoration: underline; }
+.floating-chat-input {
+  display: grid; grid-template-columns: 1fr auto; gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid #e5ecf3;
+  background: #fff;
+}
+.floating-chat-input input {
+  padding: 8px 10px;
+  border: 1px solid #cad7e4; border-radius: 9px;
+  font-size: 13px; outline: none; color: #28425d;
+}
+.floating-chat-input input:focus { border-color: #0b69ee; }
+.floating-chat-input input:disabled { background: #f4f6f9; cursor: not-allowed; }
+.floating-chat-input button {
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 9px;
+  color: #fff; background: #0b69ee;
+  cursor: pointer;
+}
+.floating-chat-input button:disabled { opacity: .5; cursor: not-allowed; }
+.floating-chat-input button:not(:disabled):hover { background: #0958c9; }
+
+@media (max-width: 540px) {
+  .floating-chat-panel { right: 12px; left: 12px; width: auto; bottom: 80px; max-height: 400px; }
+  .floating-assistant-btn { bottom: 18px; right: 18px; }
+  .openmaic-iframe { min-height: 400px; height: calc(100vh - 260px); }
+}
+
+/* 拖动时的视觉反馈 */
+.floating-assistant-btn { cursor: grab; user-select: none; }
+.floating-assistant-btn:active { cursor: grabbing; }
+
+/* 右键菜单 */
+.floating-context-menu {
+  position: fixed; z-index: 100;
+  min-width: 140px;
+  padding: 5px;
+  border: 1px solid #d0ddec; border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 40, 70, .16);
+  animation: panel-in .15s ease-out;
+}
+.floating-context-menu button {
+  width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border: 0; border-radius: 7px;
+  color: #28425d; background: transparent;
+  font-size: 13px; cursor: pointer;
+  text-align: left;
+}
+.floating-context-menu button:hover { background: #f0f5fb; color: #0b69ee; }
+
+/* 隐藏后的小恢复按钮 */
+.floating-restore-btn {
+  position: fixed; bottom: 16px; right: 16px; z-index: 90;
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%;
+  color: #fff; background: linear-gradient(135deg, #312e81, #1e1b4b);
+  box-shadow: 0 3px 14px rgba(139, 92, 246, .4);
+  cursor: pointer;
+  transition: transform .2s, box-shadow .2s;
+  animation: float-bob 3s ease-in-out infinite;
+}
+.floating-restore-btn:hover { transform: scale(1.12); box-shadow: 0 5px 20px rgba(139, 92, 246, .55); }

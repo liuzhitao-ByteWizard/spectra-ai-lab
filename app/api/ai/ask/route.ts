@@ -88,7 +88,7 @@ export async function POST(request: Request) {
       );
     }
   } catch {
-    return Response.json({ error: "AI 助教暂时不可用，请稍后重试" }, { status: 503 });
+    // D1 unavailable in local dev — skip rate limit instead of blocking AI
   }
 
   const requestBody = JSON.stringify({

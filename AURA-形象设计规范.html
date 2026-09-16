@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>星尘 AURA · AI 助手形象设计规范 v1.0</title>
+<style>
+:root{
+  --cy:#22D3EE; --vi:#8B5CF6; --ind:#312E81; --ink:#1B1B22;
+  --sub:#6B7280; --line:#E5E7EB; --bg:#FFFFFF; --soft:#F8F9FC;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);
+  font-family:"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+  line-height:1.75;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding:56px 32px 88px}
+header{border-bottom:1px solid var(--line);padding-bottom:32px;margin-bottom:48px}
+.eyebrow{font-size:12px;letter-spacing:.22em;color:var(--vi);font-weight:600;margin-bottom:14px}
+h1{font-size:38px;font-weight:700;letter-spacing:-.02em;line-height:1.2}
+h1 small{display:block;font-size:15px;font-weight:400;color:var(--sub);margin-top:12px;letter-spacing:0}
+h2{font-size:20px;font-weight:700;margin:56px 0 8px;letter-spacing:-.01em}
+h2::before{content:"";display:inline-block;width:6px;height:18px;background:var(--cy);
+  vertical-align:-2px;margin-right:12px;border-radius:2px}
+h3{font-size:15px;font-weight:600;margin:28px 0 10px}
+p{font-size:14.5px;color:#374151;margin-bottom:12px}
+.lead{font-size:16px;color:#4B5563;background:var(--soft);border-left:3px solid var(--vi);
+  padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0 8px}
+figure{margin:24px 0}
+img{width:100%;display:block;border-radius:12px;border:1px solid var(--line);background:#F3F4F6}
+figcaption{font-size:12.5px;color:var(--sub);margin-top:10px}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+.card{border:1px solid var(--line);border-radius:12px;padding:18px 20px;background:#fff}
+.card .k{font-size:12px;color:var(--sub);letter-spacing:.05em;margin-bottom:4px}
+.card .v{font-size:14px;color:#374151}
+.sw{display:flex;gap:10px;margin:18px 0 6px}
+.sw div{flex:1;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.sw .chip{height:66px}
+.sw .meta{padding:10px 12px;font-size:12px;color:var(--sub);background:#fff}
+.sw .meta b{display:block;color:var(--ink);font-size:13px;font-weight:600;margin-bottom:2px}
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12.5px;color:var(--sub);font-weight:600;letter-spacing:.05em;background:var(--soft)}
+td:first-child{font-weight:600;white-space:nowrap;width:132px}
+ul{margin:8px 0 12px 20px;font-size:14.5px;color:#374151}
+li{margin-bottom:6px}
+.tag{display:inline-block;font-size:12px;padding:3px 10px;border-radius:999px;
+  background:#EEF2FF;color:#4F46E5;margin:0 6px 6px 0}
+.dont .tag{background:#FEF2F2;color:#DC2626}
+footer{margin-top:64px;padding-top:24px;border-top:1px solid var(--line);
+  font-size:12.5px;color:var(--sub)}
+@media(max-width:760px){.g2,.g3,.g4{grid-template-columns:1fr}h1{font-size:29px}.wrap{padding:36px 20px 60px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">CHARACTER DESIGN SPEC · V1.0</div>
+  <h1>星尘 AURA
+    <small>轻盈灵动的「光影精灵」——面向 C 端 AI 助手的主形象方案</small>
+  </h1>
+</header>
+
+<p class="lead">AURA 不是机器，也不是人，而是一团<strong>被赋予了性格的光</strong>。它半透明、会流动、会散成星尘——既有科技的可信度，又有陪伴的温度。核心记忆点一句话概括：<strong>「一颗会眨眼的水滴，裹着一整片星空。」</strong></p>
+
+<h2>一、形象定位</h2>
+<div class="grid g3">
+  <div class="card"><div class="k">名字</div><div class="v">AURA（光晕／灵气）<br>中文名「星尘」</div></div>
+  <div class="card"><div class="k">性格</div><div class="v">好奇、温柔、话不多但句句有用；遇到难题会安静思考</div></div>
+  <div class="card"><div class="k">目标感受</div><div class="v">轻盈 · 灵气 · 有魔法感 · 不压迫</div></div>
+</div>
+<div class="grid g2" style="margin-top:16px">
+  <div class="card"><div class="k">适用场景</div><div class="v">C 端个人助理、陪伴类产品、创意工具、儿童／家庭向 AI</div></div>
+  <div class="card"><div class="k">不适用场景</div><div class="v">金融风控、严肃 B 端办公、医疗诊断等需要强确定性的场景</div></div>
+</div>
+
+<h2>二、造型规格</h2>
+<figure>
+  <img src="generated-images/aura/aura-01-三视图.png" alt="AURA 正面、侧面、背面三视图">
+  <figcaption>图 1 — 三视图（正面／侧面／背面）。注意识别点：水滴形主体、环形发光眼、环绕的数据结晶、底部渐隐的能量拖尾。</figcaption>
+</figure>
+
+<div class="grid g2">
+  <div class="card"><div class="k">体型比例</div><div class="v">整体高约 2.2 头身；头部与身体融为一体（无颈）；底部收窄并渐隐为光尾，不落地</div></div>
+  <div class="card"><div class="k">材质语言</div><div class="v">内层半透明果冻质感 + 外层流动星尘粒子；边缘自发青紫色辉光</div></div>
+  <div class="card"><div class="k">面部</div><div class="v">两只对称的环形发光眼，无嘴无鼻——情绪完全由眼睛形状与光强表达</div></div>
+  <div class="card"><div class="k">核心记忆元素</div><div class="v">① 水滴轮廓 ② 环形眼 ③ 环绕悬浮的数据结晶 ④ 底部渐隐光尾</div></div>
+</div>
+
+<h2>三、色彩体系</h2>
+<p>主色取自「星云」意象：青色代表清醒与响应，紫色代表想象与温柔。辉光必须作用于暗底，浅色界面上需改用描边版本。</p>
+<div class="sw">
+  <div><div class="chip" style="background:#22D3EE"></div><div class="meta"><b>星尘青 #22D3EE</b>主色 / 待机辉光</div></div>
+  <div><div class="chip" style="background:#8B5CF6"></div><div class="meta"><b>灵光紫 #8B5CF6</b>辅色 / 思考与想象</div></div>
+  <div><div class="chip" style="background:#312E81"></div><div class="meta"><b>深空蓝 #312E81</b>暗底背景 / 深色模式</div></div>
+  <div><div class="chip" style="background:#F0ABFC"></div><div class="meta"><b>晨曦粉 #F0ABFC</b>点缀 / 愉悦情绪</div></div>
+  <div><div class="chip" style="background:#F8FAFC"></div><div class="meta"><b>辉光白 #F8FAFC</b>高光 / 焦点强调</div></div>
+</div>
+<figure>
+  <img src="generated-images/aura/aura-03-配色变体.png" alt="AURA 三套配色变体">
+  <figcaption>图 2 — 配色变体：① 星云版（青紫，主推）② 晨曦版（橙粉，适合日间／亲和场景）③ 深空版（靛银，适合夜间模式与专业场景）。</figcaption>
+</figure>
+
+<h2>四、表情与状态</h2>
+<figure>
+  <img src="generated-images/aura/aura-02-表情与状态集.png" alt="AURA 表情与状态集">
+  <figcaption>图 3 — 表情状态集：打招呼、好奇、思考、惊讶、休眠、专注工作。</figcaption>
+</figure>
+<table>
+  <tr><th>状态</th><th>眼睛形态</th><th>光效与动作</th><th>使用时机</th></tr>
+  <tr><td>待机</td><td>两个均匀的柔光圆环，缓慢呼吸</td><td>整体上下浮动 ±3%，粒子缓慢环绕</td><td>空闲、等待输入</td></tr>
+  <tr><td>打招呼</td><td>圆环略微放大，微微上倾</td><td>亮度提升 15%，身体轻轻前倾一次</td><td>会话开始、唤醒</td></tr>
+  <tr><td>好奇</td><td>一大一小（近大远小）</td><td>头部微微侧倾，结晶转速加快</td><td>反问、追问用户</td></tr>
+  <tr><td>思考</td><td>圆环收窄为细线</td><td>粒子向头顶汇聚成螺旋，光强降低</td><td>生成中 / 检索中</td></tr>
+  <tr><td>惊讶</td><td>圆环瞬间放大为满圆</td><td>整体轻微后仰，粒子四散后回收</td><td>遇到意外输入、纠错</td></tr>
+  <tr><td>专注工作</td><td>圆环压扁，微微前压</td><td>身周浮现数据结晶阵列，稳定环绕</td><td>多步任务执行中</td></tr>
+  <tr><td>休眠</td><td>圆环收为两个小点，缓慢明灭</td><td>亮度降至 30%，浮动幅度减半</td><td>长时间无交互、夜间</td></tr>
+</table>
+
+<h2>五、动效规范</h2>
+<div class="grid g2">
+  <div class="card"><div class="k">基础节奏</div><div class="v">呼吸周期 3.2s，浮动周期 4.0s；缓动统一用 <code>ease-in-out</code>，禁止线性运动</div></div>
+  <div class="card"><div class="k">状态切换</div><div class="v">240–320ms 过渡；切换中不得改变身体轮廓，只变眼睛、光强与粒子</div></div>
+  <div class="card"><div class="k">粒子密度</div><div class="v">常态 8–12 颗结晶；思考态向头顶聚拢；忙碌态增至 20 颗以内</div></div>
+  <div class="card"><div class="k">降级方案</div><div class="v">低性能端仅保留呼吸缩放 + 眼睛变化，关闭粒子系统</div></div>
+</div>
+
+<h2>六、应用场景</h2>
+<figure>
+  <img src="generated-images/aura/aura-04-场景应用.png" alt="AURA 桌面场景应用">
+  <figcaption>图 4 — 场景应用示意：悬浮于工作台一隅，作为常驻陪伴与状态指示器。</figcaption>
+</figure>
+<h3>推荐用法</h3>
+<div>
+  <span class="tag">对话界面常驻头像</span>
+  <span class="tag">加载 / 生成中的状态指示</span>
+  <span class="tag">空状态与引导页主视觉</span>
+  <span class="tag">通知与气泡提示</span>
+  <span class="tag">深色模式下的辉光强调</span>
+  <span class="tag">周边与品牌延展</span>
+</div>
+<h3 style="margin-top:22px">使用禁忌</h3>
+<div class="dont">
+  <span class="tag">不得添加嘴巴、四肢或拟人化五官</span>
+  <span class="tag">不得改变水滴轮廓或加上机械外壳</span>
+  <span class="tag">不得用于表达错误、警告等负向语义</span>
+  <span class="tag">浅色背景上禁止使用纯辉光版本，需加描边</span>
+  <span class="tag">粒子数量不得超过 24 颗</span>
+</div>
+
+<footer>
+  星尘 AURA 形象设计规范 v1.0 · 图片由 AI 生成，仅作视觉方向参考；正式投产需重绘为矢量资产并建立组件库。<br>
+  生成日期：2026-09-16
+</footer>
+
+</div>
+</body>
+</html>
