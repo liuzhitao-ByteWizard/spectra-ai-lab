@@ -271,13 +271,17 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     : telescopeAngle < -SCOPE_DIRECTION_DEADBAND
       ? -1
       : null;
+  // The active order follows the one physical telescope axis. At zero, retain
+  // the last side only as the next measurement target; the eyepiece itself
+  // shows the shared zero-order reference.
+  const activeObservationOrder = directedObservationOrder ?? observationOrder;
   const displayedLines = useMemo(
     () => sourceProfile.lines.filter((line) => lightSource !== "mercury" || showWeak || !line.weak),
     [lightSource, showWeak, sourceProfile],
   );
   const selectedLine = displayedLines.find((line) => line.wavelengthNm === selectedWavelength) ?? displayedLines[0];
-  const targetAngle = selectedLine ? calculateDiffractionAngle(selectedLine.wavelengthNm, linesPerMm, stageAngle, observationOrder) : null;
-  const observationLabel = observationOrder === 1 ? "右侧 +1 级" : "左侧 −1 级";
+  const targetAngle = selectedLine ? calculateDiffractionAngle(selectedLine.wavelengthNm, linesPerMm, stageAngle, activeObservationOrder) : null;
+  const observationLabel = activeObservationOrder === 1 ? "右侧 +1 级" : "左侧 −1 级";
   const rawReadings = useMemo(() => makeVernierReadings(telescopeAngle), [telescopeAngle]);
   const alignmentTolerance = clamp(.035 + (1 - focus) * .26 + (1 - collimatorFocus) * .24 + slitOptics.broadening * .2, .045, .28);
   const zeroAligned = Math.abs(getOpticalOffset(0, telescopeAxisAngle)) <= alignmentTolerance;
@@ -740,9 +744,12 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
+    const telescopeSceneRotation = mechanicalAngleToSceneRotation(telescopeAxisAngle);
     runtime.stageGroup.rotation.y = mechanicalAngleToSceneRotation(stageAngle);
-    runtime.mainDial.rotation.y = mechanicalAngleToSceneRotation(telescopeAxisAngle);
-    runtime.telescopeGroup.rotation.y = mechanicalAngleToSceneRotation(telescopeAxisAngle);
+    // The telescope tube, its mount and the graduated dial use this single
+    // transform. Nothing in the physical telescope rotates independently.
+    runtime.mainDial.rotation.y = telescopeSceneRotation;
+    runtime.telescopeGroup.rotation.y = telescopeSceneRotation;
     const jawCenter = .09 + slitOptics.jawGap / 2;
     runtime.slitJaws[0].position.y = jawCenter;
     runtime.slitJaws[1].position.y = -jawCenter;
@@ -849,12 +856,6 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     toast.info(`已启用${profile.name}`);
   };
 
-  const selectObservationOrder = (next: DiffractionOrder) => {
-    if (next === observationOrder) return;
-    setObservationOrder(next);
-    setLastMessage(`已切换到${next === 1 ? "右侧 +1 级" : "左侧 −1 级"}观测。`);
-  };
-
   const reset = () => {
     setLinesPerMm(300); setSlitWidth(.36); setCollimatorFocus(.86); setFocus(.86); setStageAngle(0); setTelescopeAngle(0);
     setLightSource("mercury"); setObservationOrder(1); setShowWeak(false); setLampOn(true); setShowRays(true); setSelectedWavelength(435.84);
@@ -884,16 +885,16 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     if (!selectedLine || targetAngle === null) return toast.warning("该光栅参数下此谱线不可见，请更换刻线密度或目标谱线。");
     if (!enforce(Boolean(zeroReference) && focusReady && slitReady && stageReady && targetAligned, "请先完成零级参考，并把目标谱线调到叉丝中心。")) return;
     if (!zeroReference) return toast.warning("请先记录零级参考；一级观测必须使用零级读数消除零位误差。");
-    if (records.some((record) => record.source === lightSource && record.order === observationOrder && record.wavelengthNm === selectedLine.wavelengthNm)) return toast.info("该侧的这条谱线已经记录；可切换观测侧或选择另一条谱线。");
+    if (records.some((record) => record.source === lightSource && record.order === activeObservationOrder && record.wavelengthNm === selectedLine.wavelengthNm)) return toast.info("该侧的这条谱线已经记录；请转向另一侧或选择另一条谱线。");
     const raw = makeVernierReadings(telescopeAngle);
     const thetaDeg = Math.abs(signedAngleDelta(raw.mean, zeroReference.mean));
     const dNm = 1_000_000 / linesPerMm;
     const calculatedNm = dNm * Math.sin(toRadians(thetaDeg));
     const errorPercent = (calculatedNm - selectedLine.wavelengthNm) / selectedLine.wavelengthNm * 100;
     const reading: Reading = {
-      id: `${lightSource}-${observationOrder}-${selectedLine.wavelengthNm}-${Date.now()}`,
+      id: `${lightSource}-${activeObservationOrder}-${selectedLine.wavelengthNm}-${Date.now()}`,
       source: lightSource,
-      order: observationOrder,
+      order: activeObservationOrder,
       wavelengthNm: selectedLine.wavelengthNm,
       label: selectedLine.label,
       raw,
@@ -957,7 +958,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
         <div>
           <p className="eyebrow">预习 · 原生 Web 3D 分光计</p>
           <h1>在真实操作逻辑中完成一次光栅衍射实验。</h1>
-          <p>三维视图同步呈现入射光、零级光和左右两侧一级光谱；双侧目镜同时显示，便于比较 −1 级与 +1 级。</p>
+          <p>三维视图同步呈现入射光、零级光和左右两侧一级光谱；单个目镜始终与真实镜筒朝向同步。</p>
         </div>
       </div>
 
@@ -1003,7 +1004,9 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               </div>
             </div>
           </div>
+        </div>
 
+        <aside className="lab-control-column">
           <div className="instrument-control-deck">
             <div className="deck-section controls-compact">
               <div className="deck-heading"><span><SlidersHorizontal size={17} />仪器调节</span><small>键盘 ←/→ 微调望远镜；Shift + ←/→ 微调载物台</small></div>
@@ -1050,59 +1053,28 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               </div>
             </div>
           </div>
-        </div>
 
-        <aside className="virtual-lab-side">
           <section className="scope-card">
-            <div className="scope-card-head"><span><Eye size={17} />双侧望远镜目镜</span><b>{directedObservationOrder === null ? "φ=0° · 双零级参考" : `单镜筒 · ${directedObservationOrder === 1 ? "右侧 +1 级" : "左侧 −1 级"}`}</b></div>
-            <div className="dual-scope-grid">
-              {([-1, 1] as DiffractionOrder[]).map((order) => {
-                const axisAngle = telescopeAxisAngle;
-                const panelAvailable = directedObservationOrder === null || directedObservationOrder === order;
-                const showSpectrum = panelAvailable && directedObservationOrder !== null;
-                const sideTargetAngle = selectedLine ? calculateDiffractionAngle(selectedLine.wavelengthNm, linesPerMm, stageAngle, order) : null;
-                const sideTargetOffset = sideTargetAngle === null ? null : getOpticalOffset(sideTargetAngle, axisAngle);
-                const sideTargetInScope = sideTargetAngle !== null && isRayInScope(sideTargetAngle, axisAngle);
-                const sideLabel = order === -1 ? "左侧 −1 级" : "右侧 +1 级";
-                const sideAligned = panelAvailable && directedObservationOrder !== null && sideTargetOffset !== null && Math.abs(sideTargetOffset) <= alignmentTolerance;
-                const sideStatus = !panelAvailable
-                  ? "镜筒未朝向此侧"
-                  : directedObservationOrder === null
-                    ? "零级参考"
-                    : sourceProfile.continuous
-                      ? "连续谱"
-                      : sideTargetAngle === null
-                        ? "当前谱线不可见"
-                        : sideAligned
-                          ? "目标已对准"
-                          : sideTargetInScope
-                            ? `偏差 ${Math.abs(sideTargetOffset ?? 0).toFixed(2)}°`
-                            : `视场外 ${Math.abs(sideTargetOffset ?? 0).toFixed(2)}°`;
-                return <div key={order} className={`scope-panel ${observationOrder === order ? "is-selected" : ""} ${!panelAvailable ? "is-unavailable" : ""}`}>
-                  <button className="scope-side-head" onClick={() => selectObservationOrder(order)} aria-pressed={observationOrder === order} disabled={!panelAvailable}><span>{sideLabel}</span><b className={sideAligned && !sourceProfile.continuous ? "is-aligned" : ""}>{sideStatus}</b></button>
-                  <div className={`scope-screen ${!focusReady ? "is-unfocused" : ""} ${!lampOn ? "is-dark" : ""} ${!panelAvailable ? "is-unavailable" : ""}`}>
-                    <div className="scope-optical-field">
-                      <span className="scope-circle" />
-                      <span className="scope-crosshair horizontal" /><span className="scope-crosshair vertical" />
-                      {lampOn && panelAvailable && isRayInScope(0, axisAngle) && <i className="scope-zero" style={makeScopeLineStyle(0, axisAngle, "#ecf7ff", .28 + slitOptics.throughput * .48)} />}
-                      {lampOn && showSpectrum && displayedLines.map((line) => {
-                        const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle, order);
-                        if (angle === null || !isRayInScope(angle, axisAngle)) return null;
-                        const isTarget = line.wavelengthNm === selectedLine?.wavelengthNm;
-                        const opacity = line.intensity * (line.weak ? .55 : 1) * (.28 + slitOptics.throughput * .72) * (sourceProfile.continuous ? .76 : 1);
-                        return <i key={line.wavelengthNm} className={`scope-spectrum-line ${isTarget ? "is-target" : ""} ${sourceProfile.continuous ? "is-continuous" : ""}`} style={makeScopeLineStyle(angle, axisAngle, line.color, opacity, isTarget)} />;
-                      })}
-                      {!lampOn && panelAvailable && <span className="scope-empty">{sourceProfile.name}未开启</span>}
-                      {lampOn && panelAvailable && !focusReady && <span className="scope-quality-note">焦距未调准</span>}
-                    </div>
-                    {!panelAvailable && <span className="scope-unavailable">镜筒未朝向此侧</span>}
-                  </div>
-                </div>;
-              })}
+            <div className="scope-card-head"><span><Eye size={17} />望远镜目镜</span><b>{directedObservationOrder === null ? "φ=0° · 零级参考" : `镜筒朝向 · ${observationLabel}`}</b></div>
+            <div className={`scope-screen scope-screen-single ${!focusReady ? "is-unfocused" : ""} ${!lampOn ? "is-dark" : ""}`}>
+              <div className="scope-optical-field">
+                <span className="scope-circle" />
+                <span className="scope-crosshair horizontal" /><span className="scope-crosshair vertical" />
+                {lampOn && directedObservationOrder === null && isRayInScope(0, telescopeAxisAngle) && <i className="scope-zero" style={makeScopeLineStyle(0, telescopeAxisAngle, "#ecf7ff", .28 + slitOptics.throughput * .48)} />}
+                {lampOn && directedObservationOrder !== null && displayedLines.map((line) => {
+                  const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle, activeObservationOrder);
+                  if (angle === null || !isRayInScope(angle, telescopeAxisAngle)) return null;
+                  const isTarget = line.wavelengthNm === selectedLine?.wavelengthNm;
+                  const opacity = line.intensity * (line.weak ? .55 : 1) * (.28 + slitOptics.throughput * .72) * (sourceProfile.continuous ? .76 : 1);
+                  return <i key={line.wavelengthNm} className={`scope-spectrum-line ${isTarget ? "is-target" : ""} ${sourceProfile.continuous ? "is-continuous" : ""}`} style={makeScopeLineStyle(angle, telescopeAxisAngle, line.color, opacity, isTarget)} />;
+                })}
+                {!lampOn && <span className="scope-empty">{sourceProfile.name}未开启</span>}
+                {lampOn && !focusReady && <span className="scope-quality-note">焦距未调准</span>}
+              </div>
             </div>
             <div className="scope-target-row">
               <button onClick={() => adjustSelectedTarget(-1)} aria-label="上一条目标谱线"><ChevronLeft size={18} /></button>
-              <div><span>{sourceProfile.continuous ? "当前色带" : `记录侧：${observationLabel}`}</span><strong><i style={{ background: selectedLine?.color }} />{selectedLine?.wavelengthNm.toFixed(2)} nm · {selectedLine?.label}</strong></div>
+              <div><span>{directedObservationOrder === null ? "零级参考" : sourceProfile.continuous ? "当前色带" : `记录侧：${observationLabel}`}</span><strong><i style={{ background: selectedLine?.color }} />{selectedLine?.wavelengthNm.toFixed(2)} nm · {selectedLine?.label}</strong></div>
               <button onClick={() => adjustSelectedTarget(1)} aria-label="下一条目标谱线"><ChevronRight size={18} /></button>
             </div>
           </section>
@@ -1127,7 +1099,6 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
             <small className="lab-message">{lastMessage}</small>
           </section>
         </aside>
-      </section>
 
       <section className="measurement-area">
         <div className="measurement-heading"><div><p className="eyebrow">测量证据</p><h2>双侧一级谱线读数与零级校正</h2></div><div className="measurement-actions"><button onClick={exportCsv}><Download size={16} />导出 CSV</button><button onClick={reset}><RotateCcw size={16} />重新实验</button></div></div>
@@ -1140,6 +1111,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
           </div>
         </div>
         <p className={`error-explainer ${records.length ? "has-data" : ""}`}><CircleAlert size={17} /><span><b>当前诊断：</b>{errorText}。系统会保留真实读数与偏差，便于复核零级、法线与像质条件。</span></p>
+      </section>
       </section>
     </div>
   );
