@@ -432,7 +432,7 @@ function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
         <div className="hero-noise" aria-hidden="true" />
         <div className="hero-copy">
           <p className="eyebrow">AI + 物理实验</p>
-          <h1>融合 AI 技术的衍射图样分析与参数反演研究</h1>
+          <h1>基于三维虚拟仿真与AI图像分析的分光计参数反演实验系统</h1>
           <p>课前用虚拟仪器完成预习，课中从真实照片自动检查零级、汞线与拟合质量，课后沿五阶段证据复盘。</p>
           <div className="hero-actions"><button className="primary-action" onClick={() => navigate("guide")}><ListChecks size={18} />开始实验流程</button><button className="secondary-action" onClick={() => navigate("simulator")}><Play size={17} />进入虚拟预习</button></div>
         </div>
