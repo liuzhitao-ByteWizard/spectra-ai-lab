@@ -289,6 +289,22 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   const focusReady = focus >= .72 && collimatorFocus >= .72;
   const slitReady = slitWidth >= .22 && slitWidth <= .56;
   const stageReady = Math.abs(stageAngle) <= .15;
+  const zeroInScope = Math.abs(getOpticalOffset(0, telescopeAxisAngle)) <= SCOPE_FIELD_HALF_ANGLE;
+  const zeroReadyToCalibrate = lampOn && focusReady && slitReady && stageReady && zeroAligned;
+  const zeroCalibrationStatus = zeroReference ? "已标定" : zeroReadyToCalibrate ? "已对准 · 待标定" : "未标定";
+  const zeroCalibrationHint = !lampOn
+    ? `请先开启${sourceProfile.shortName}。`
+    : !zeroInScope
+      ? "零级在视场外，请回到 φ=0° 标定。"
+      : !focusReady || !slitReady
+        ? "请先调好狭缝与焦距。"
+        : !stageReady
+          ? "请先将光栅法线归零。"
+          : !zeroAligned
+            ? "转动望远镜，使零级线与叉丝重合。"
+            : zeroReference
+              ? `零级基准：${formatDms(zeroReference.mean)}；可重新标定。`
+              : "零级线已在叉丝中心，可记录基准。";
   const usableReadings = records.filter((record) => record.thetaDeg > .01);
   const fit = useMemo(() => {
     if (usableReadings.length < 2) return null;
@@ -874,8 +890,11 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   const captureZero = () => {
     if (!enforce(lampOn && focusReady && slitReady && stageReady && zeroAligned, "请先调好狭缝和焦距，让光栅法线与望远镜都回到零级。")) return;
     const reading = makeVernierReadings(telescopeAngle);
+    const isRecalibration = Boolean(zeroReference);
     setZeroReference({ ...reading, phiDeg: telescopeAngle, aligned: zeroAligned && stageReady });
-    const message = zeroAligned && stageReady ? `零级参考已记录。现在选择一条${sourceProfile.shortName}谱线并让叉丝与谱线重合。` : "零级参考已记录，但未对准；后续数据会保留该系统误差。";
+    const message = zeroAligned && stageReady
+      ? `${isRecalibration ? "零级参考已重新标定" : "零级参考已记录"}。现在选择一条${sourceProfile.shortName}谱线并让叉丝与谱线重合。`
+      : "零级参考已记录，但未对准；后续数据会保留该系统误差。";
     setLastMessage(message);
     toast.success(message);
   };
@@ -963,6 +982,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       </div>
 
       <section className="virtual-lab-shell">
+        <div className="lab-primary-column">
         <div className="lab-scene-column">
           <div className="scene-meta-bar">
             <div className="scene-badges">
@@ -1004,6 +1024,20 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               </div>
             </div>
           </div>
+        </div>
+
+        <section className="measurement-area">
+          <div className="measurement-heading"><div><p className="eyebrow">测量证据</p><h2>双侧一级谱线读数与零级校正</h2></div><div className="measurement-actions"><button onClick={exportCsv}><Download size={16} />导出 CSV</button><button onClick={reset}><RotateCcw size={16} />重新实验</button></div></div>
+          <div className="measurement-grid">
+            <div className="reading-table-wrap">
+              {records.length ? <table className="virtual-reading-table"><thead><tr><th>光源</th><th>侧 / 级次</th><th>谱线</th><th>游标 A</th><th>游标 B</th><th>校正 θ</th><th>反算 λ</th><th>相对误差</th></tr></thead><tbody>{records.map((record) => <tr key={record.id} className={record.aligned ? "" : "has-warning"}><td>{LIGHT_SOURCES[record.source].shortName}</td><td>{record.order === 1 ? "右 +1" : "左 −1"}</td><td><i style={{ background: LIGHT_SOURCES[record.source].lines.find((line) => line.wavelengthNm === record.wavelengthNm)?.color }} />{record.wavelengthNm.toFixed(2)} nm · {record.label}</td><td>{formatDms(record.raw.a)}</td><td>{formatDms(record.raw.b)}</td><td>{record.thetaDeg.toFixed(3)}°</td><td>{record.calculatedNm.toFixed(2)} nm</td><td>{record.errorPercent >= 0 ? "+" : ""}{record.errorPercent.toFixed(2)}%</td></tr>)}</tbody></table> : <div className="measurement-empty"><Telescope size={27} /><strong>尚未记录谱线</strong><p>对准零级并记录参考后，可测量左右任一侧的一级特征线。</p></div>}
+            </div>
+            <div className={`fit-summary ${fit ? "has-fit" : ""}`}>
+              {fit ? <><small>由 {records.length} 条一级读数联合拟合</small><strong>d = {fit.dUm.toFixed(3)} μm</strong><span>{linesPerMm} 线/mm · RMSE {fit.rmseNm.toFixed(2)} nm</span><p><CheckCircle2 size={16} />{errorText}</p><button onClick={() => navigate("guide")}>继续实验流程 <ArrowRight size={15} /></button></> : <><Aperture size={28} /><strong>等待两条有效谱线</strong><p>零级差值会自动用于每条一级读数的衍射角计算。</p></>}
+            </div>
+          </div>
+          <p className={`error-explainer ${records.length ? "has-data" : ""}`}><CircleAlert size={17} /><span><b>当前诊断：</b>{errorText}。系统会保留真实读数与偏差，便于复核零级、法线与像质条件。</span></p>
+        </section>
         </div>
 
         <aside className="lab-control-column">
@@ -1060,7 +1094,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               <div className="scope-optical-field">
                 <span className="scope-circle" />
                 <span className="scope-crosshair horizontal" /><span className="scope-crosshair vertical" />
-                {lampOn && directedObservationOrder === null && isRayInScope(0, telescopeAxisAngle) && <i className="scope-zero" style={makeScopeLineStyle(0, telescopeAxisAngle, "#ecf7ff", .28 + slitOptics.throughput * .48)} />}
+                {lampOn && zeroInScope && <i className="scope-zero" style={makeScopeLineStyle(0, telescopeAxisAngle, "#d9edff", .16 + slitOptics.throughput * .28)} />}
                 {lampOn && directedObservationOrder !== null && displayedLines.map((line) => {
                   const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle, activeObservationOrder);
                   if (angle === null || !isRayInScope(angle, telescopeAxisAngle)) return null;
@@ -1069,8 +1103,17 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
                   return <i key={line.wavelengthNm} className={`scope-spectrum-line ${isTarget ? "is-target" : ""} ${sourceProfile.continuous ? "is-continuous" : ""}`} style={makeScopeLineStyle(angle, telescopeAxisAngle, line.color, opacity, isTarget)} />;
                 })}
                 {!lampOn && <span className="scope-empty">{sourceProfile.name}未开启</span>}
+                {lampOn && !zeroInScope && <span className="scope-zero-outside">零级在视场外 · 回到 φ=0° 可标定</span>}
                 {lampOn && !focusReady && <span className="scope-quality-note">焦距未调准</span>}
               </div>
+            </div>
+            <div className="scope-calibration-row" aria-live="polite">
+              <div>
+                <span>零级标定</span>
+                <strong className={zeroReference || zeroReadyToCalibrate ? "is-ready" : ""}>{zeroCalibrationStatus}</strong>
+                <small>{zeroCalibrationHint}</small>
+              </div>
+              <button onClick={captureZero} disabled={!zeroReadyToCalibrate}><Crosshair size={15} />{zeroReference ? "重新标定" : "标定零级"}</button>
             </div>
             <div className="scope-target-row">
               <button onClick={() => adjustSelectedTarget(-1)} aria-label="上一条目标谱线"><ChevronLeft size={18} /></button>
@@ -1083,7 +1126,6 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
             <div className="side-card-heading"><span><Gauge size={17} />双游标读数</span><small>分辨率 1′</small></div>
             <div className="vernier-values"><div><span>游标 A</span><strong>{formatDms(rawReadings.a)}</strong></div><div><span>游标 B</span><strong>{formatDms(rawReadings.b)}</strong></div></div>
             <p>平均读数：<b>{formatDms(rawReadings.mean)}</b> · {zeroReference ? `零级参考：${formatDms(zeroReference.mean)}` : "尚未建立零级参考"}</p>
-            <button className="zero-record-button" onClick={captureZero}><Crosshair size={16} />记录零级参考</button>
           </section>
 
           <section className="guide-card">
@@ -1099,19 +1141,6 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
             <small className="lab-message">{lastMessage}</small>
           </section>
         </aside>
-
-      <section className="measurement-area">
-        <div className="measurement-heading"><div><p className="eyebrow">测量证据</p><h2>双侧一级谱线读数与零级校正</h2></div><div className="measurement-actions"><button onClick={exportCsv}><Download size={16} />导出 CSV</button><button onClick={reset}><RotateCcw size={16} />重新实验</button></div></div>
-        <div className="measurement-grid">
-          <div className="reading-table-wrap">
-            {records.length ? <table className="virtual-reading-table"><thead><tr><th>光源</th><th>侧 / 级次</th><th>谱线</th><th>游标 A</th><th>游标 B</th><th>校正 θ</th><th>反算 λ</th><th>相对误差</th></tr></thead><tbody>{records.map((record) => <tr key={record.id} className={record.aligned ? "" : "has-warning"}><td>{LIGHT_SOURCES[record.source].shortName}</td><td>{record.order === 1 ? "右 +1" : "左 −1"}</td><td><i style={{ background: LIGHT_SOURCES[record.source].lines.find((line) => line.wavelengthNm === record.wavelengthNm)?.color }} />{record.wavelengthNm.toFixed(2)} nm · {record.label}</td><td>{formatDms(record.raw.a)}</td><td>{formatDms(record.raw.b)}</td><td>{record.thetaDeg.toFixed(3)}°</td><td>{record.calculatedNm.toFixed(2)} nm</td><td>{record.errorPercent >= 0 ? "+" : ""}{record.errorPercent.toFixed(2)}%</td></tr>)}</tbody></table> : <div className="measurement-empty"><Telescope size={27} /><strong>尚未记录谱线</strong><p>对准零级并记录参考后，可测量左右任一侧的一级特征线。</p></div>}
-          </div>
-          <div className={`fit-summary ${fit ? "has-fit" : ""}`}>
-            {fit ? <><small>由 {records.length} 条一级读数联合拟合</small><strong>d = {fit.dUm.toFixed(3)} μm</strong><span>{linesPerMm} 线/mm · RMSE {fit.rmseNm.toFixed(2)} nm</span><p><CheckCircle2 size={16} />{errorText}</p><button onClick={() => navigate("guide")}>继续实验流程 <ArrowRight size={15} /></button></> : <><Aperture size={28} /><strong>等待两条有效谱线</strong><p>零级差值会自动用于每条一级读数的衍射角计算。</p></>}
-          </div>
-        </div>
-        <p className={`error-explainer ${records.length ? "has-data" : ""}`}><CircleAlert size={17} /><span><b>当前诊断：</b>{errorText}。系统会保留真实读数与偏差，便于复核零级、法线与像质条件。</span></p>
-      </section>
       </section>
     </div>
   );
