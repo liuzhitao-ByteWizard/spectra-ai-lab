@@ -417,7 +417,7 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
   min-height: calc(100svh - 68px);
   position: relative;
   isolation: isolate;
-  grid-template-columns: minmax(0, 700px) minmax(390px, 470px);
+  grid-template-columns: minmax(0, 640px) minmax(360px, 450px);
   justify-content: center;
   gap: clamp(34px, 4vw, 64px);
   background: radial-gradient(circle at 70% 34%, #174c8f 0, #0b274c 30%, #061426 70%);
@@ -458,13 +458,23 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 }
 .hero-copy {
   z-index: 3;
+  min-width: 0;
+  max-width: 640px;
   opacity: calc(1 - var(--hero-scroll) * .70);
   transform: translate3d(0, calc(var(--hero-scroll) * -28px), 0);
   filter: blur(calc(var(--hero-scroll) * 2.5px));
   transition: opacity .08s linear, transform .08s linear, filter .08s linear;
 }
 .hero-copy .eyebrow { color: #9dc7ff; text-shadow: 0 0 18px #3186ffb0; }
-.hero-copy h1 { text-wrap: balance; text-shadow: 0 5px 32px #00102580; }
+.hero-copy h1 {
+  max-width: 620px;
+  font-size: clamp(36px, 4vw, 56px);
+  line-height: 1.12;
+  letter-spacing: -.045em;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+  text-shadow: 0 5px 32px #00102580;
+}
 .hero-copy > p:not(.eyebrow) { color: #c0d2e6; }
 .hero-actions .primary-action { box-shadow: 0 0 28px #1678ff57, 0 8px 24px #001b46b5; }
 
@@ -636,8 +646,10 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 .record-diagnosis strong { font-size: 13px; }.record-diagnosis p { margin: 7px 0 0; color: #6f8294; font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
 .record-empty.compact { min-height: 150px; }
 
-@media (max-width: 1100px) {
-  .home-hero { grid-template-columns: 1fr; min-height: auto; padding-top: 58px; padding-bottom: 78px; }
+@media (max-width: 1320px) {
+  .home-hero { grid-template-columns: minmax(0, 1fr); min-height: auto; padding-top: 58px; padding-bottom: 78px; }
+  .hero-copy { max-width: 800px; }
+  .hero-copy h1 { max-width: 760px; font-size: clamp(36px, 5.2vw, 56px); }
   .analysis-float { width: 100%; max-width: none; justify-self: stretch; transform: translate3d(0, calc(var(--hero-scroll) * -18px), 0); }
   .analysis-pipeline { grid-template-columns: 1fr 1fr; }
   .analysis-summary { min-height: 60px; }
