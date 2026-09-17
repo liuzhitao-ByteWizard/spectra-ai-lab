@@ -357,7 +357,7 @@ const AnalysisGlassPanel = memo(function AnalysisGlassPanel() {
         {SPECTRAL_LIBRARY.mercury.map((line, index) => (
           <i
             key={line.wavelengthNm}
-            className={`${index <= stage ? "visible" : ""}${index === 4 ? " yellow-doublet-right" : ""}`}
+            className={`${index <= stage || (index === 4 && stage >= 3) ? "visible" : ""}${index === 4 ? " yellow-doublet-right" : ""}`}
             style={{ left: `${[13, 28, 57, 74, 86][index]}%`, backgroundColor: line.color }}
           >
             <b>{line.wavelengthNm.toFixed(2)}</b>
