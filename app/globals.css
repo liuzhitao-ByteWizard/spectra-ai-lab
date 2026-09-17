@@ -432,9 +432,11 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 .hero-copy .eyebrow { color: #9dc7ff; text-shadow: 0 0 18px #3186ffb0; }
 .hero-copy h1 {
   max-width: 620px;
+  font-family: var(--font-noto-sans-sc), "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei UI", sans-serif;
   font-size: clamp(36px, 4vw, 56px);
+  font-weight: 800;
   line-height: 1.12;
-  letter-spacing: -.045em;
+  letter-spacing: -.025em;
   overflow-wrap: anywhere;
   text-wrap: balance;
   text-shadow: 0 5px 32px #00102580;

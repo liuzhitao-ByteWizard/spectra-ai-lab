@@ -1,5 +1,13 @@
 import type { Metadata } from "next";
+import { Noto_Sans_SC } from "next/font/google";
 import "./globals.css";
+
+const notoSansSc = Noto_Sans_SC({
+  variable: "--font-noto-sans-sc",
+  weight: ["700", "800"],
+  subsets: ["latin"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "SPECTRA｜AI 分光计实验学习助手",
@@ -10,7 +18,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body className={notoSansSc.variable}>{children}</body>
     </html>
   );
 }
