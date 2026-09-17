@@ -1026,6 +1026,27 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
           </div>
         </div>
 
+        <div className="evidence-prelude">
+          <section className="vernier-card">
+            <div className="side-card-heading"><span><Gauge size={17} />双游标读数</span><small>分辨率 1′</small></div>
+            <div className="vernier-values"><div><span>游标 A</span><strong>{formatDms(rawReadings.a)}</strong></div><div><span>游标 B</span><strong>{formatDms(rawReadings.b)}</strong></div></div>
+            <p>平均读数：<b>{formatDms(rawReadings.mean)}</b> · {zeroReference ? `零级参考：${formatDms(zeroReference.mean)}` : "尚未建立零级参考"}</p>
+          </section>
+
+          <section className="guide-card">
+            <div className="guide-card-head"><span><span className="guide-step-number">{step + 1}</span>实验引导</span><small>按步骤完成即可</small></div>
+            <p><Lightbulb size={17} />{instruction}</p>
+            <div className="guide-checks">
+              <span className={focusReady && slitReady ? "done" : ""}>{focusReady && slitReady ? <Check size={14} /> : <i />}狭缝与焦距</span>
+              <span className={stageReady ? "done" : ""}>{stageReady ? <Check size={14} /> : <i />}光栅法线</span>
+              <span className={zeroReference?.aligned ? "done" : ""}>{zeroReference?.aligned ? <Check size={14} /> : <i />}零级参考</span>
+              <span className={records.length >= 2 ? "done" : ""}>{records.length >= 2 ? <Check size={14} /> : <i />}两条谱线</span>
+            </div>
+            <button className="record-line-button" onClick={captureLine}><Target size={17} />记录当前目标谱线</button>
+            <small className="lab-message">{lastMessage}</small>
+          </section>
+        </div>
+
         <section className="measurement-area">
           <div className="measurement-heading"><div><p className="eyebrow">测量证据</p><h2>双侧一级谱线读数与零级校正</h2></div><div className="measurement-actions"><button onClick={exportCsv}><Download size={16} />导出 CSV</button><button onClick={reset}><RotateCcw size={16} />重新实验</button></div></div>
           <div className="measurement-grid">
@@ -1122,24 +1143,6 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
             </div>
           </section>
 
-          <section className="vernier-card">
-            <div className="side-card-heading"><span><Gauge size={17} />双游标读数</span><small>分辨率 1′</small></div>
-            <div className="vernier-values"><div><span>游标 A</span><strong>{formatDms(rawReadings.a)}</strong></div><div><span>游标 B</span><strong>{formatDms(rawReadings.b)}</strong></div></div>
-            <p>平均读数：<b>{formatDms(rawReadings.mean)}</b> · {zeroReference ? `零级参考：${formatDms(zeroReference.mean)}` : "尚未建立零级参考"}</p>
-          </section>
-
-          <section className="guide-card">
-            <div className="guide-card-head"><span><span className="guide-step-number">{step + 1}</span>实验引导</span><small>按步骤完成即可</small></div>
-            <p><Lightbulb size={17} />{instruction}</p>
-            <div className="guide-checks">
-              <span className={focusReady && slitReady ? "done" : ""}>{focusReady && slitReady ? <Check size={14} /> : <i />}狭缝与焦距</span>
-              <span className={stageReady ? "done" : ""}>{stageReady ? <Check size={14} /> : <i />}光栅法线</span>
-              <span className={zeroReference?.aligned ? "done" : ""}>{zeroReference?.aligned ? <Check size={14} /> : <i />}零级参考</span>
-              <span className={records.length >= 2 ? "done" : ""}>{records.length >= 2 ? <Check size={14} /> : <i />}两条谱线</span>
-            </div>
-            <button className="record-line-button" onClick={captureLine}><Target size={17} />记录当前目标谱线</button>
-            <small className="lab-message">{lastMessage}</small>
-          </section>
         </aside>
       </section>
     </div>
