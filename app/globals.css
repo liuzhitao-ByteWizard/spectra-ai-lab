@@ -483,7 +483,8 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 .analysis-axis { position: absolute; z-index: 2; background: #d9edff42; }.analysis-axis.x { height: 1px; left: 8%; right: 8%; top: 55%; }.analysis-axis.y { width: 1px; top: 14%; bottom: 16%; left: 50%; }
 .analysis-visual > i { width: 2px; position: absolute; z-index: 3; top: 18%; bottom: 20%; opacity: .10; transform: scaleY(.18); transform-origin: 50% 55%; box-shadow: 0 0 7px currentColor, 0 0 17px currentColor; transition: opacity .45s ease, transform .55s cubic-bezier(.2,.8,.2,1); }
 .analysis-visual > i.visible { opacity: .96; transform: scaleY(1); }
-.analysis-visual > i b { position: absolute; left: 6px; top: 5px; color: #cfe5ff; font-size: 12px; font-weight: 650; line-height: 1; }
+.analysis-visual > i b { position: absolute; left: 6px; top: 5px; color: #cfe5ff; font-size: 11px; font-weight: 650; line-height: 1; white-space: nowrap; }
+.analysis-visual > i.yellow-doublet-right b { right: 6px; left: auto; text-align: right; }
 .analysis-scan { width: 24%; position: absolute; z-index: 4; top: 0; bottom: 0; background: linear-gradient(90deg, transparent, #8dccff19, #d7f1ff4a, transparent); border-right: 1px solid #9cd3ff66; animation: spectrum-scan 3.8s ease-in-out infinite; }
 @keyframes spectrum-scan { 0%, 100% { left: -26%; } 50% { left: 102%; } }
 .analysis-visual > small { position: absolute; z-index: 5; left: 13px; bottom: 10px; color: #8ba9c5; font-size: 12px; letter-spacing: .03em; }

@@ -357,10 +357,10 @@ const AnalysisGlassPanel = memo(function AnalysisGlassPanel() {
         {SPECTRAL_LIBRARY.mercury.map((line, index) => (
           <i
             key={line.wavelengthNm}
-            className={index <= stage ? "visible" : ""}
-            style={{ left: `${[13, 28, 57, 77, 81][index]}%`, backgroundColor: line.color }}
+            className={`${index <= stage ? "visible" : ""}${index === 4 ? " yellow-doublet-right" : ""}`}
+            style={{ left: `${[13, 28, 57, 74, 86][index]}%`, backgroundColor: line.color }}
           >
-            <b>{line.wavelengthNm.toFixed(0)}</b>
+            <b>{line.wavelengthNm.toFixed(2)}</b>
           </i>
         ))}
         <span className="analysis-scan" />
