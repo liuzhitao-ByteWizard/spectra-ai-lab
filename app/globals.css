@@ -715,6 +715,35 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 /* === OpenMAIC 互动课堂 === */
 .openmaic-fullscreen { position: fixed; inset: 0; z-index: 40; background: #fff; }
 .openmaic-iframe-full { display: block; width: 100%; height: 100%; border: 0; }
+.classroom-launch {
+  display: grid; place-items: center; padding: 28px;
+  background:
+    radial-gradient(circle at 78% 16%, rgba(34, 211, 238, .22), transparent 25rem),
+    radial-gradient(circle at 20% 84%, rgba(91, 89, 255, .2), transparent 28rem),
+    #07172c;
+}
+.classroom-launch-card {
+  width: min(100%, 620px); padding: clamp(30px, 6vw, 58px);
+  color: #eaf4ff; border: 1px solid rgba(160, 213, 255, .24); border-radius: 24px;
+  background: rgba(10, 32, 59, .86); box-shadow: 0 24px 70px rgba(0, 0, 0, .28);
+}
+.classroom-launch-kicker { display: inline-flex; align-items: center; gap: 8px; color: #79e8ff; font-size: .92rem; font-weight: 700; }
+.classroom-launch-card h1 { margin: 18px 0 14px; color: #fff; font-size: clamp(1.9rem, 5vw, 3rem); line-height: 1.15; }
+.classroom-launch-card > p { margin: 0; color: #c4d8ea; font-size: 1rem; line-height: 1.75; }
+.classroom-primary-link {
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px; margin-top: 28px; padding: 13px 20px;
+  color: #04213a; border-radius: 11px; background: #6ee7f5; font-weight: 750; text-decoration: none;
+  transition: transform .2s, background .2s;
+}
+.classroom-primary-link:hover { transform: translateY(-2px); background: #b1f5ff; }
+.classroom-launch-note { margin-top: 28px !important; font-size: .85rem !important; }
+.classroom-launch-note code { padding: 2px 5px; color: #d9f6ff; border-radius: 4px; background: rgba(126, 227, 255, .12); }
+.openmaic-open-external {
+  position: fixed; top: 18px; right: 18px; z-index: 50; display: inline-flex; align-items: center; gap: 5px;
+  padding: 8px 11px; color: #d6efff; border: 1px solid rgba(255,255,255,.19); border-radius: 9px;
+  background: rgba(7, 23, 44, .75); font-size: .8rem; text-decoration: none; backdrop-filter: blur(8px);
+}
+.openmaic-open-external:hover { color: #fff; background: rgba(7, 23, 44, .94); }
 .openmaic-back-btn {
   position: fixed; top: 16px; left: 16px; z-index: 50;
   display: flex; align-items: center; gap: 6px;

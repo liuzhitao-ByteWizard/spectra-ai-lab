@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import {
   Aperture, ArrowLeft, ArrowRight, BarChart3, BookOpen, Bot, Camera, Check,
   CheckCircle2, ChevronRight, CircleAlert, CircleHelp, ClipboardCheck, Clock3,
-  Download, FileText, FlaskConical, History, Home,
+  Download, ExternalLink, FileText, FlaskConical, History, Home,
   Lightbulb, ListChecks, LogIn, LogOut, MessageCircle, Microscope, Play, RotateCcw, Save,
   ScanLine, Send, SlidersHorizontal, Target, Telescope, Upload, Users, Waves,
 } from "lucide-react";
@@ -454,18 +454,51 @@ function SimulatorModule({ journey, navigate, updateJourney }: { journey: Experi
   return <VirtualSpectrometer3D journey={journey} navigate={navigate} updateJourney={updateJourney} />;
 }
 
-const OPENMAIC_URL = process.env.NEXT_PUBLIC_OPENMAIC_URL || "http://localhost:3001";
+const OPENMAIC_URL = process.env.NEXT_PUBLIC_OPENMAIC_URL?.trim();
+const HOSTED_OPENMAIC_URL = "https://open.maic.chat";
+const isLoopbackClassroomUrl = (url: string) => {
+  try {
+    const host = new URL(url).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+};
 
 function AssistantModule({ journey, navigate }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void }) {
-  const [iframeKey, setIframeKey] = useState(0);
+  const [isLocalBrowser, setIsLocalBrowser] = useState(false);
+  useEffect(() => {
+    const host = window.location.hostname;
+    setIsLocalBrowser(host === "localhost" || host === "127.0.0.1" || host === "::1");
+  }, []);
+
+  const canEmbedClassroom = Boolean(OPENMAIC_URL) && (!isLoopbackClassroomUrl(OPENMAIC_URL!) || isLocalBrowser);
+  if (!canEmbedClassroom) return <div className="openmaic-fullscreen classroom-launch">
+    <section className="classroom-launch-card" aria-labelledby="classroom-launch-title">
+      <span className="classroom-launch-kicker"><Users size={18} /> OpenMAIC 互动课堂</span>
+      <h1 id="classroom-launch-title">在新窗口开启互动课堂</h1>
+      <p>线上课堂服务不能嵌入当前页面。点击下方按钮即可进入可用的互动课堂；首次使用请按页面提示登录或输入访问码。</p>
+      <a className="classroom-primary-link" href={HOSTED_OPENMAIC_URL} target="_blank" rel="noreferrer">
+        进入互动课堂 <ExternalLink size={18} />
+      </a>
+      <p className="classroom-launch-note">如已部署自己的 OpenMAIC 服务，可通过 <code>NEXT_PUBLIC_OPENMAIC_URL</code> 配置其公开 HTTPS 地址并在这里直接嵌入。</p>
+    </section>
+    <button className="openmaic-back-btn" onClick={() => navigate("home")} aria-label="返回主站">
+      <ArrowLeft size={18} />
+      <span>返回主站</span>
+    </button>
+  </div>;
+
   return <div className="openmaic-fullscreen">
     <iframe
-      key={iframeKey}
       className="openmaic-iframe-full"
       src={OPENMAIC_URL}
       title="SPECTRA 互动课堂"
       allow="microphone; camera; autoplay; fullscreen; clipboard-write"
     />
+    <a className="openmaic-open-external" href={OPENMAIC_URL} target="_blank" rel="noreferrer">
+      无法显示课堂？在新窗口打开 <ExternalLink size={15} />
+    </a>
     <button className="openmaic-back-btn" onClick={() => navigate("home")} aria-label="返回主站">
       <ArrowLeft size={18} />
       <span>返回主站</span>
