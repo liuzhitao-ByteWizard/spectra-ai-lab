@@ -357,7 +357,7 @@ const AnalysisGlassPanel = memo(function AnalysisGlassPanel() {
         {SPECTRAL_LIBRARY.mercury.map((line, index) => (
           <i
             key={line.wavelengthNm}
-            className={`${index <= stage || (index === 4 && stage >= 3) ? "visible" : ""}${index === 4 ? " yellow-doublet-right" : ""}`}
+            className={`${index <= stage || (index === 4 && stage >= 3) ? "visible" : ""}${index === 3 ? " yellow-doublet-left" : ""}${index === 4 ? " yellow-doublet-right" : ""}`}
             style={{ left: `${[13, 28, 57, 74, 86][index]}%`, backgroundColor: line.color }}
           >
             <b>{line.wavelengthNm.toFixed(2)}</b>
@@ -382,7 +382,7 @@ const AnalysisGlassPanel = memo(function AnalysisGlassPanel() {
       </div>
       <div className="analysis-summary">
         <span><small>拟合质量</small><strong>RMSE 0.42 nm</strong></span>
-        <span><small>反演波长</small><strong>435.8 nm</strong></span>
+        <span><small>反演波长</small><strong>435.80 nm</strong></span>
       </div>
     </aside>
   );
