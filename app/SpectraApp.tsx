@@ -3,16 +3,15 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
-  Aperture, ArrowLeft, ArrowRight, BarChart3, BookOpen, Bot, Camera, Check,
+  Aperture, ArrowLeft, ArrowRight, BarChart3, BookOpen, Bot, Camera,
   CheckCircle2, ChevronRight, CircleAlert, CircleHelp, ClipboardCheck, Clock3,
   Download, ExternalLink, FileText, FlaskConical, History, Home,
-  Lightbulb, ListChecks, LogIn, LogOut, MessageCircle, Microscope, Play, RotateCcw, Save,
+  LogIn, LogOut, MessageCircle, Microscope, Play, RotateCcw, Save,
   ScanLine, Send, SlidersHorizontal, Target, Telescope, Upload, Users, Waves,
 } from "lucide-react";
 import { toast } from "sonner";
 import Image from "next/image";
 import { Toaster } from "@/components/ui/sonner";
-import { Progress } from "@/components/ui/progress";
 import AssistantAnswer from "./AssistantAnswer";
 import AuroraField from "./AuroraField";
 import FloatingAssistant from "./FloatingAssistant";
@@ -31,7 +30,7 @@ const VirtualSpectrometer3D = dynamic(() => import("./VirtualSpectrometer3D"), {
   loading: () => <div className="virtual-lab-loading"><Telescope size={28} /><strong>正在加载三维分光计</strong><span>仪器模型与实时光路准备中…</span></div>,
 });
 
-type ModuleId = "home" | "simulator" | "assistant" | "analysis" | "guide" | "records";
+type ModuleId = "home" | "simulator" | "assistant" | "analysis" | "records";
 type Peak = { x: number; xRatio: number; family: string; color: string; confidence: number; prominence: number; widthPx: number; wavelengthNm?: number };
 type DetectorOptions = { prominence: number; minDistancePx: number };
 type SpectrumSource = {
@@ -46,7 +45,6 @@ const formatChinaDateTime = (value: string | number) => new Date(value).toLocale
 const formatChinaClock = (value: string | number) => new Date(value).toLocaleTimeString("zh-CN", { timeZone: CHINA_TIME_ZONE, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const navItems: { id: ModuleId; label: string; icon: typeof Home }[] = [
   { id: "home", label: "首页", icon: Home },
-  { id: "guide", label: "实验引导", icon: ListChecks },
   { id: "simulator", label: "虚拟分光计", icon: Telescope },
   { id: "analysis", label: "图像分析", icon: ScanLine },
   { id: "assistant", label: "互动课堂", icon: Users },
@@ -308,10 +306,10 @@ function AppHeader({ active, onChange, authenticated, authHref, authLabel, viewe
         <span><strong>SPECTRA</strong><small>分光计实验学习助手</small></span>
       </button>
       <nav className="main-nav" aria-label="主导航">
-        {navItems.map((item) => <button key={item.id} className={`${active === item.id ? "active" : ""} ${item.id === "guide" ? "flow-entry" : ""}`} aria-current={active === item.id ? "page" : undefined} onClick={() => onChange(item.id)}>{item.label}</button>)}
+        {navItems.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} aria-current={active === item.id ? "page" : undefined} onClick={() => onChange(item.id)}>{item.label}</button>)}
       </nav>
       <div className="topbar-actions">
-        <button className="ghost-button" onClick={() => toast.info("主流程：虚拟预习 → 零级参考图与 φ₀ → 一级单侧认线与 φᵢ → d 与不确定度 → 云端复盘")}><CircleHelp size={17} /> 流程帮助</button>
+        <button className="ghost-button" onClick={() => toast.info("从虚拟分光计开始熟悉仪器，再使用图像分析处理真实测量数据。 ")}><CircleHelp size={17} /> 使用说明</button>
         {authHref ? <a className="auth-link" href={authHref} target="_top" title={viewerName ?? authLabel}>{authenticated ? <LogOut size={16} /> : <LogIn size={16} />}{authLabel}</a> : authenticated ? <span className="auth-link" title={viewerName ?? authLabel}><CheckCircle2 size={16} />{authLabel}</span> : null}
       </div>
     </header>
@@ -320,10 +318,6 @@ function AppHeader({ active, onChange, authenticated, authHref, authLabel, viewe
 
 function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description?: string; action?: React.ReactNode }) {
   return <div className="module-heading"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{description && <p className="heading-description">{description}</p>}</div>{action}</div>;
-}
-
-function FlowBanner({ stage, navigate }: { stage: string; navigate: (id: ModuleId) => void }) {
-  return <div className="flow-banner"><span><ListChecks size={16} />当前阶段：{stage}</span><button onClick={() => navigate("guide")}><ArrowLeft size={15} />返回实验流程</button></div>;
 }
 
 const AnalysisGlassPanel = memo(function AnalysisGlassPanel() {
@@ -433,8 +427,8 @@ function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
         <div className="hero-copy">
           <p className="eyebrow">AI + 物理实验</p>
           <h1>基于三维虚拟仿真与AI图像分析的分光计参数反演实验系统</h1>
-          <p>课前用虚拟仪器完成预习，课中从真实照片自动检查零级、汞线与拟合质量，课后沿五阶段证据复盘。</p>
-          <div className="hero-actions"><button className="primary-action" onClick={() => navigate("guide")}><ListChecks size={18} />开始实验流程</button><button className="secondary-action" onClick={() => navigate("simulator")}><Play size={17} />进入虚拟预习</button></div>
+          <p>使用虚拟仪器熟悉分光计操作，再用真实照片完成零级定位、汞线匹配与光栅常数反演。</p>
+          <div className="hero-actions"><button className="primary-action" onClick={() => navigate("simulator")}><Play size={18} />开始虚拟预习</button><button className="secondary-action" onClick={() => navigate("analysis")}><ScanLine size={17} />进入图像分析</button></div>
         </div>
         <AnalysisGlassPanel />
         <div className="hero-scroll-cue" aria-hidden="true"><span>向下探索</span><i /></div>
@@ -785,7 +779,7 @@ function useExperimentSync({
   return { phase, lastSyncedAt, errorMessage, currentSnapshotSynced, retryLoad, syncNow, resetSync };
 }
 
-function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, authenticated, finishExperiment }: { analyzeSignal?: number; journey: ExperimentJourney; navigate: (id: ModuleId) => void; updateJourney: (patch: Partial<ExperimentJourney>) => void; authenticated: boolean; finishExperiment: () => void }) {
+function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticated, finishExperiment }: { analyzeSignal?: number; journey: ExperimentJourney; updateJourney: (patch: Partial<ExperimentJourney>) => void; authenticated: boolean; finishExperiment: () => void }) {
   const task: ExperimentTask = "A";
   const [detector, setDetector] = useState<DetectorOptions>({ prominence: .018, minDistancePx: 3 });
   const [aSource, setASource] = useState<SpectrumSource | null>(() => analyzeSignal > 0 ? buildSampleSource() : null);
@@ -988,7 +982,6 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
   ];
 
   return <div className="module-page analysis-page">
-    <FlowBanner stage="2–4 / 5 · 采集、识别与反演" navigate={navigate} />
     <PageHeading eyebrow="实验 · 图像分析工作台" title="从两份采集证据到可复核的测量结果。" description="零级参考图与游标读数 φ₀ 单独采集；一级单侧谱图用于识别、标记谱线。逐条记录一级谱线读数 φᵢ，按 θᵢ = |φᵢ − φ₀| 计算衍射角；由角度和已知波长拟合未知光栅常数，图像像素位置不参与反演。" />
     <div className="analysis-workbench">
       <aside className="panel parameter-panel"><div className="analysis-card-heading"><span><SlidersHorizontal size={18} /></span><div><h2>测量参数</h2><p>零级和一级读数来自分光计游标；图片仅负责认线、质检和留存。</p></div></div><div className="parameter-form">
@@ -1019,43 +1012,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, navigate, updateJourney, a
   </div>;
 }
 
-const guideSteps = [
-  { title: "虚拟预习", detail: "在虚拟分光计中瞄准至少两条汞线并生成拟合，建立真实操作顺序。", image: "/guide/01-align-optics.jpg", alt: "实验人员调节真实分光计", position: "center 42%", credit: "SAHAYA RAJAN S · CC0", source: "https://commons.wikimedia.org/wiki/File:Spectrometer_prism_table.jpg", target: "simulator" as ModuleId },
-  { title: "光谱采集与质量检查", detail: "分别上传零级参考图与一级单侧谱图；零级可以不在一级谱图的画面中。", image: "/guide/02-zero-order.jpg", alt: "真实光学实验台", position: "center 48%", credit: "Waifer X · CC BY 2.0", source: "https://commons.wikimedia.org/wiki/File:Optical_Bench_educational_Kit_-_Cuesta_College.jpg", target: "analysis" as ModuleId },
-  { title: "自适应标定与谱线匹配", detail: "按实际谱线数量匹配参考库，排除叉丝、刻度等伪峰；将用于计算的每条谱线分别对准叉丝并填写游标读数。", image: "/guide/03-aim-lines.jpg", alt: "光栅产生的真实可见光谱", position: "center 47%", credit: "NOIRLab / NSF / AURA · CC BY 4.0", source: "https://commons.wikimedia.org/wiki/File:Diffraction_grating_(noao-02613).jpg", target: "analysis" as ModuleId },
-  { title: "d 反演及不确定度评估", detail: "以 θᵢ = |φᵢ − φ₀| 和 d sin θ = λ 反演未知 d；单条谱线仅暂估，两条及以上才检查残差和不确定度。", image: "/guide/05-calculate.jpg", alt: "实验室电脑正在分析测量数据", position: "center 44%", credit: "MikeRun · CC BY-SA 4.0", source: "https://commons.wikimedia.org/wiki/File:Lab-notebook-spreadsheet-simulation.jpg", target: "analysis" as ModuleId },
-  { title: "云端归档与实验复盘", detail: "结果、照片、逐线残差、不确定度预算与异常诊断同步后，形成可导出的证据链。", image: "/guide/06-uncertainty.jpg", alt: "实验人员复核分析结果", position: "center 52%", credit: "Linda Bartlett / NCI · Public domain", source: "https://commons.wikimedia.org/wiki/File:Scientists_examine_a_graph.jpg", target: "records" as ModuleId },
-];
-
-function GuideModule({ journey, navigate }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void }) {
-  const states = [
-    { done: journey.prelab.capturedLines >= 2 && journey.prelab.dUm !== null, data: `${journey.prelab.capturedLines} 条谱线${journey.prelab.dUm ? ` · d=${journey.prelab.dUm.toFixed(3)} μm` : ""}`, reason: "至少记录两条谱线并生成拟合" },
-    { done: journey.capture.imageCount > 0 && journey.capture.exposureOk && journey.capture.sharpnessOk, data: journey.capture.imageCount ? `${journey.capture.imageCount} 张 · 曝光${journey.capture.exposureOk ? "通过" : "未通过"} · 清晰度${journey.capture.sharpnessOk ? "通过" : "未通过"}` : "尚无真实照片", reason: "需上传真实照片并通过曝光、清晰度检查" },
-    { done: journey.capture.zeroReferenceCaptured && journey.capture.zeroReadingDeg !== null && journey.identification.matchedLines >= 1, data: `零级参考${journey.capture.zeroReferenceCaptured ? "已上传" : "未上传"} · φ₀ ${journey.capture.zeroReadingDeg?.toFixed(4) ?? "—"}° · 匹配 ${journey.identification.matchedLines} 条`, reason: "需上传零级参考图、填写 φ₀ 并确认至少一条参考谱线" },
-    { done: journey.inversion.reportable, data: journey.inversion.reportable ? `d=${journey.inversion.dUm?.toFixed(3)} ± ${journey.inversion.expandedUncertaintyUm?.toFixed(3)} μm` : "尚未形成可报告结果", reason: journey.inversion.blockReason || "需通过可辨识性与边界检查" },
-    { done: journey.archive.synced, data: journey.archive.syncedAt ? `已同步 · ${formatChinaDateTime(journey.archive.syncedAt)}` : "尚未归档", reason: "需将结果与证据成功同步到云端记录" },
-  ];
-  const firstIncompleteIndex = states.findIndex((state) => !state.done);
-  const hasActiveStage = firstIncompleteIndex !== -1;
-  const firstIncomplete = hasActiveStage ? firstIncompleteIndex : guideSteps.length - 1;
-  const [step, setStep] = useState(firstIncomplete);
-  const current = guideSteps[step], state = states[step];
-  const completed = states.filter((item) => item.done).length;
-  const viewingCurrentStage = hasActiveStage && step === firstIncomplete;
-  const previewingStage = !viewingCurrentStage;
-  const previewRequirement = state.done ? "本阶段已由真实数据自动完成，可在此查看保存的照片与实验说明。" : state.reason;
-  return <div className="module-page"><PageHeading eyebrow="实验 · 主流程" title="每一阶段都由真实数据自动判定。" description="这里是整站实验入口：状态、证据、阻塞原因与下一步操作均来自对应模块，不能手动打勾。" />
-    <div className="guide-grid"><aside className="panel step-list" aria-label="实验阶段目录">{guideSteps.map((item, index) => {
-      const isCurrent = hasActiveStage && index === firstIncomplete;
-      const status = states[index].done ? "已完成" : isCurrent ? "进行中" : "待开始";
-      return <button type="button" key={item.title} className={`${step === index ? "selected" : ""} ${states[index].done ? "done" : ""} ${isCurrent ? "current" : ""}`} aria-label={`预览阶段要求：${item.title}，${status}`} aria-current={isCurrent ? "step" : undefined} aria-pressed={step === index} onClick={() => setStep(index)}><span className="step-node">{states[index].done ? <Check size={16} /> : index + 1}</span><span className="step-summary"><strong>{item.title}</strong><small>{status}</small></span></button>;
-    })}</aside>
-      <section className="panel guide-detail"><figure className="guide-visual"><Image key={current.image} src={current.image} alt={current.alt} fill priority={step === 0} sizes="(max-width: 1100px) 100vw, 50vw" style={{ objectPosition: current.position }} /><div className="guide-photo-shade" aria-hidden="true" /><span>STAGE {String(step + 1).padStart(2, "0")}</span><figcaption><span>真实实验照片</span><a href={current.source} target="_blank" rel="noreferrer">{current.credit}</a></figcaption></figure><div className="guide-copy"><p className="eyebrow">{previewingStage ? "阶段要求预览 · 不改变实验进度" : "当前阶段 · 由真实数据自动判定"}</p><h2>{current.title}</h2><p>{current.detail}</p><div className="checkpoint"><ClipboardCheck size={19} /><div><strong>{previewingStage ? "完成条件" : "当前证据"}</strong><span>{previewingStage ? previewRequirement : state.data}</span></div></div>{viewingCurrentStage && !state.done && <p className="guide-block"><CircleAlert size={16} />阻塞原因：{state.reason}</p>}{previewingStage && hasActiveStage && <p className="guide-preview-note">当前进行中：{guideSteps[firstIncomplete].title}。此预览不会启动、完成或改变任何阶段状态。</p>}<div className="guide-actions">{viewingCurrentStage ? <><button className="secondary-action" onClick={() => navigate("assistant")}><Bot size={16} />询问当前异常</button><button className="primary-action" onClick={() => navigate(current.target)}>前往完成阶段<ArrowRight size={16} /></button></> : hasActiveStage ? <><button className="secondary-action" onClick={() => navigate("assistant")}><Bot size={16} />询问阶段要求</button><button className="secondary-action" onClick={() => setStep(firstIncomplete)}>返回当前阶段<ArrowRight size={16} /></button></> : <><button className="secondary-action" onClick={() => navigate("assistant")}><Bot size={16} />询问实验复盘</button><button className="primary-action" onClick={() => navigate("records")}>查看实验记录<ArrowRight size={16} /></button></>}</div></div></section>
-      <aside className="panel guide-side"><div><Lightbulb size={20} /><strong>流程如何产生价值？</strong><p>预习、照片质量、自动认线、科学反演与云端报告共享同一状态；任何一步失败都会给出真实阻塞原因，不会产生貌似精确的最终数值。</p></div><div className="progress-block"><span>实验进度 <strong>{Math.round(completed / 5 * 100)}%</strong></span><Progress value={completed / 5 * 100} /><small>云端状态更新于 {journey.updatedAt ? formatChinaDateTime(journey.updatedAt) : "尚未保存"}</small></div></aside></div>
-  </div>;
-}
-
-function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: ModuleId) => void; authenticated: boolean; authHref: string | null }) {
+function RecordsModule({ authenticated, authHref }: { authenticated: boolean; authHref: string | null }) {
   const [records, setRecords] = useState<SavedRecord[]>([]); const [loading, setLoading] = useState(authenticated); const [selected, setSelected] = useState<SavedRecord | null>(null);
   const [errorMessage, setErrorMessage] = useState(""); const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const refresh = useCallback(async () => {
@@ -1084,8 +1041,8 @@ function RecordsModule({ navigate, authenticated, authHref }: { navigate: (id: M
   const exportCsv = () => { const rows = [["最后更新", "任务", "光源", "状态", "结果", "质量"], ...records.map((r) => [formatChinaDateTime(r.updatedAt), r.task, r.source, r.status === "draft" ? "进行中" : r.status === "needs_review" ? "需复核" : "已完成", r.resultValue, r.quality])]; downloadFile("spectra-experiments.csv", rows.map((row) => row.map((v) => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"), "text/csv"); };
   const markerCount = Array.isArray(selected?.payload.referenceMarkers) ? selected.payload.referenceMarkers.length : 0;
   const imageEntries = selected ? Object.entries(selected.imageUrls) as [ExperimentImageSlot, string][] : [];
-  if (!authenticated) return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="登录后查看你的实验记录。" description="未登录状态不会读取或保存个人数据。登录后可在不同设备间同步记录、图片与实验报告。" action={authHref ? <a className="primary-action" href={authHref} target="_top"><LogIn size={16} />登录 ChatGPT</a> : undefined} /><div className="panel record-empty"><History size={34} /><strong>个人记录受到登录保护</strong><p>完成邮箱验证后即可自动保存与跨设备查看。</p></div></div>;
-  return <div className="module-page"><FlowBanner stage="5 / 5 · 云端归档与实验复盘" navigate={navigate} /><PageHeading eyebrow="课后 · 实验记录与复盘" title="回看每次实验，复核过程与结果。" description="查看实验步骤、原始光谱、测量结果与异常诊断；支持导出 CSV 和实验报告。" action={<button className="secondary-action" onClick={exportCsv} disabled={!records.length}><Download size={16} />导出全部 CSV</button>} />
+  if (!authenticated) return <div className="module-page"><PageHeading eyebrow="课后 · 实验记录与复盘" title="登录后查看你的实验记录。" description="未登录状态不会读取或保存个人数据。登录后可在不同设备间同步记录、图片与实验报告。" action={authHref ? <a className="primary-action" href={authHref} target="_top"><LogIn size={16} />登录 ChatGPT</a> : undefined} /><div className="panel record-empty"><History size={34} /><strong>个人记录受到登录保护</strong><p>完成邮箱验证后即可自动保存与跨设备查看。</p></div></div>;
+  return <div className="module-page"><PageHeading eyebrow="课后 · 实验记录与复盘" title="回看每次实验，复核过程与结果。" description="查看实验步骤、原始光谱、测量结果与异常诊断；支持导出 CSV 和实验报告。" action={<button className="secondary-action" onClick={exportCsv} disabled={!records.length}><Download size={16} />导出全部 CSV</button>} />
     <div className={`records-sync ${errorMessage ? "error" : ""}`} aria-live="polite">{errorMessage ? <><CircleAlert size={15} /><span>{errorMessage}</span><button onClick={() => void refresh()}>重新加载</button></> : <><CheckCircle2 size={15} /><span>{lastUpdated ? `云端记录已更新 · ${formatChinaClock(lastUpdated)}` : "正在连接云端记录"}</span></>}</div>
     <div className="records-grid"><section className="panel record-list"><div className="panel-title"><div><span className="step-index"><History size={14} /></span><h2>我的实验</h2></div><span>{records.length} 条</span></div>{loading ? <div className="record-empty">正在读取实验记录…</div> : records.length ? records.map((record) => <button key={record.id} className={selected?.id === record.id ? "active" : ""} onClick={() => setSelected(record)}><span className="record-source"><Waves size={18} /></span><div><strong>{record.resultLabel}<small>{record.resultValue}</small></strong><p><Clock3 size={12} />{formatChinaDateTime(record.updatedAt)} · {record.source}</p></div><em className={record.status === "completed" ? "good" : ""}>{record.status === "draft" ? "进行中" : record.status === "needs_review" ? "需复核" : "已完成"}</em></button>) : <div className="record-empty"><History size={30} /><strong>还没有实验记录</strong><p>上传光谱图片后，实验过程会自动同步并出现在这里。</p></div>}</section>
       <section className="panel replay-panel">{selected ? <><div className="replay-head"><div><p className="eyebrow">实验回放</p><h2>{selected.resultLabel} · {selected.resultValue}</h2><small>最后同步于 {formatChinaDateTime(selected.updatedAt)}</small></div><a className="secondary-action" href={`/api/records/${encodeURIComponent(selected.id)}/report`} target="_blank" rel="noreferrer"><FileText size={16} />查看 / 打印报告</a></div><div className="record-evidence"><span><small>已完成阶段</small><strong>{selected.steps.length} 项</strong></span><span><small>匹配汞线</small><strong>{markerCount} 条</strong></span><span><small>记录状态</small><strong>{selected.quality}</strong></span></div>{imageEntries.length > 0 && <div className="record-images">{imageEntries.map(([slot, url]) => <figure key={slot}><Image src={url} alt="汞灯零级参考与单侧一级原始照片" width={800} height={450} unoptimized /><figcaption>{slot === "zero_reference" ? "零级参考照片" : slot === "primary" ? "一级单侧谱图" : slot === "repeat_2" ? "重复照片 2" : "重复照片 3"}</figcaption></figure>)}</div>}<div className="timeline">{selected.steps.length ? selected.steps.map((step, index) => <div className="timeline-item" key={step}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step}</strong><p>{step === "d 反演及不确定度评估" ? `${selected.resultLabel} = ${selected.resultValue}` : "该阶段的参数和证据已保存到云端记录。"}</p></div>{index < selected.steps.length - 1 && <i />}</div>) : <div className="record-empty compact"><History size={28} /><strong>实验尚未开始</strong></div>}</div><div className="record-diagnosis"><strong>异常诊断与复核意见</strong><p>{selected.diagnosis || "未填写异常诊断或复核意见。"}</p></div></> : <div className="record-empty"><Microscope size={34} /><strong>选择一条记录开始回放</strong></div>}</section></div>
@@ -1123,7 +1080,7 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
     journeySavedSignatureRef.current = JSON.stringify({ ...fresh, updatedAt: 0 });
     setJourney(fresh);
     setAnalyzeSignal((value) => value + 1);
-    setActive("guide");
+    setActive("analysis");
     if (authenticated) void fetch("/api/journey", { method: "DELETE" }).catch(() => undefined);
     toast.success("本次实验已完成，工作区已重置");
   }, [authenticated]);
@@ -1157,5 +1114,5 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}>{active !== "assistant" && <AppHeader active={active} onChange={setActive} authenticated={authenticated} authHref={authHref} authLabel={authLabel} viewerName={viewerName} />}{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} navigate={setActive} updateJourney={updateJourney} authenticated={authenticated} finishExperiment={resetExperiment} />}{active === "guide" && <GuideModule journey={journey} navigate={setActive} />}{active === "records" && <RecordsModule navigate={setActive} authenticated={authenticated} authHref={authHref} />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
+  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}>{active !== "assistant" && <AppHeader active={active} onChange={setActive} authenticated={authenticated} authHref={authHref} authLabel={authLabel} viewerName={viewerName} />}{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} authenticated={authenticated} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule authenticated={authenticated} authHref={authHref} />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
 }

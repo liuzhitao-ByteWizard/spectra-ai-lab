@@ -8,20 +8,20 @@ import { noStoreJson } from "../records/record-server";
 export async function GET() {
   try {
     const user = await getSiteUser();
-    if (!user) return noStoreJson({ error: "请先登录后恢复实验流程" }, { status: 401 });
+    if (!user) return noStoreJson({ error: "请先登录后恢复实验状态" }, { status: 401 });
     const [row] = await getDb().select().from(experimentJourneys)
       .where(eq(experimentJourneys.userId, user.userId)).limit(1);
     const journey = row ? mergeJourney(JSON.parse(row.payload)) : structuredClone(emptyJourney);
     return noStoreJson({ journey: { ...journey, updatedAt: row?.updatedAt.getTime() ?? 0 } });
   } catch (error) {
-    return noStoreJson({ error: error instanceof Error ? error.message : "实验流程暂不可用" }, { status: 503 });
+    return noStoreJson({ error: error instanceof Error ? error.message : "实验状态暂不可用" }, { status: 503 });
   }
 }
 
 export async function PUT(request: Request) {
   try {
     const user = await getSiteUser();
-    if (!user) return noStoreJson({ error: "请先登录后保存实验流程" }, { status: 401 });
+    if (!user) return noStoreJson({ error: "请先登录后保存实验状态" }, { status: 401 });
     const body = await request.json() as { journey?: unknown };
     const journey = mergeJourney(body.journey);
     const now = new Date();
@@ -39,10 +39,10 @@ export async function PUT(request: Request) {
 export async function DELETE() {
   try {
     const user = await getSiteUser();
-    if (!user) return noStoreJson({ error: "请先登录后重置实验流程" }, { status: 401 });
+    if (!user) return noStoreJson({ error: "请先登录后重置实验状态" }, { status: 401 });
     await getDb().delete(experimentJourneys).where(eq(experimentJourneys.userId, user.userId));
     return noStoreJson({ journey: structuredClone(emptyJourney) });
   } catch (error) {
-    return noStoreJson({ error: error instanceof Error ? error.message : "实验流程重置失败" }, { status: 503 });
+    return noStoreJson({ error: error instanceof Error ? error.message : "实验状态重置失败" }, { status: 503 });
   }
 }
