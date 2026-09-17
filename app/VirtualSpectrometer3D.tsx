@@ -4,15 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
-  Aperture, ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert,
-  Crosshair, Download, Eye, Focus, Gauge, Layers3, Lightbulb,
+  Aperture, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert,
+  Crosshair, Download, Eye, Focus, Gauge, Layers3,
   Maximize2, Move3D, Rotate3D, RotateCcw, SlidersHorizontal, Target, Telescope,
 } from "lucide-react";
 import { toast } from "sonner";
 import { measureGrating, SPECTRAL_LIBRARY, type MeasurementLine, type SpectrumLine } from "@/lib/spectrometer";
 import type { ExperimentJourney } from "@/lib/experiment-journey";
 
-type ModuleId = "home" | "simulator" | "assistant" | "analysis" | "guide" | "records";
+type ModuleId = "home" | "simulator" | "assistant" | "analysis" | "records";
 type MouseTool = "view" | "telescope" | "stage";
 type CameraView = "orbit" | "top" | "side";
 type LightSourceId = "mercury" | "sodium" | "hydrogen" | "white";
@@ -321,8 +321,6 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     if (!focusReady || !slitReady) return "谱线成像条件不佳，叉丝定位误差增大";
     return "当前数据存在可复核的测量偏差";
   }, [records, zeroReference?.aligned, stageReady, focusReady, slitReady]);
-  const step = !focusReady || !slitReady ? 0 : !stageReady ? 1 : !zeroReference ? 2 : records.length < 2 ? 3 : 4;
-
   useEffect(() => {
     updateJourney({
       prelab: {
@@ -963,14 +961,6 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     "--scope-line-width": `${slitOptics.scopeLineWidth + (target ? .9 : 0)}px`,
     "--scope-line-blur": `${slitOptics.scopeLineBlur}px`,
   });
-  const instruction = [
-    "调节狭缝宽度、平行光管与目镜焦距，使谱线既清晰又足够明亮。",
-    "将载物台法线调至 0°，准备以法线入射建立测量条件。",
-    "让望远镜指向零级中央亮纹，读取双游标并保存零级参考。",
-    sourceProfile.continuous ? "白光模式用于观察双侧连续色散带；切换到线光谱光源后才能记录特征线。" : `观察${observationLabel}谱线：对准叉丝、读取双游标，使用零级差值计算衍射角。`,
-    "至少两条谱线已记录。检查拟合、误差来源和测量证据。",
-  ][step];
-
   return (
     <div className="virtual-lab-page">
       <div className="virtual-lab-head">
@@ -1026,6 +1016,21 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
           </div>
         </div>
 
+        <div className="evidence-prelude">
+          <section className="vernier-card">
+            <div className="side-card-heading"><span><Gauge size={17} />双游标读数</span><small>分辨率 1′</small></div>
+            <div className="vernier-values"><div><span>游标 A</span><strong>{formatDms(rawReadings.a)}</strong></div><div><span>游标 B</span><strong>{formatDms(rawReadings.b)}</strong></div></div>
+            <p>平均读数：<b>{formatDms(rawReadings.mean)}</b> · {zeroReference ? `零级参考：${formatDms(zeroReference.mean)}` : "尚未建立零级参考"}</p>
+          </section>
+
+          <section className="vernier-card">
+            <div className="side-card-heading"><span><Target size={17} />谱线读数</span><small>对准叉丝后记录</small></div>
+            <p>使用零级参考消除零位误差；仅线光谱可记录特征谱线。</p>
+            <button className="record-line-button" onClick={captureLine}><Target size={17} />记录当前目标谱线</button>
+            <small className="lab-message">{lastMessage}</small>
+          </section>
+        </div>
+
         <section className="measurement-area">
           <div className="measurement-heading"><div><p className="eyebrow">测量证据</p><h2>双侧一级谱线读数与零级校正</h2></div><div className="measurement-actions"><button onClick={exportCsv}><Download size={16} />导出 CSV</button><button onClick={reset}><RotateCcw size={16} />重新实验</button></div></div>
           <div className="measurement-grid">
@@ -1033,7 +1038,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               {records.length ? <table className="virtual-reading-table"><thead><tr><th>光源</th><th>侧 / 级次</th><th>谱线</th><th>游标 A</th><th>游标 B</th><th>校正 θ</th><th>反算 λ</th><th>相对误差</th></tr></thead><tbody>{records.map((record) => <tr key={record.id} className={record.aligned ? "" : "has-warning"}><td>{LIGHT_SOURCES[record.source].shortName}</td><td>{record.order === 1 ? "右 +1" : "左 −1"}</td><td><i style={{ background: LIGHT_SOURCES[record.source].lines.find((line) => line.wavelengthNm === record.wavelengthNm)?.color }} />{record.wavelengthNm.toFixed(2)} nm · {record.label}</td><td>{formatDms(record.raw.a)}</td><td>{formatDms(record.raw.b)}</td><td>{record.thetaDeg.toFixed(3)}°</td><td>{record.calculatedNm.toFixed(2)} nm</td><td>{record.errorPercent >= 0 ? "+" : ""}{record.errorPercent.toFixed(2)}%</td></tr>)}</tbody></table> : <div className="measurement-empty"><Telescope size={27} /><strong>尚未记录谱线</strong><p>对准零级并记录参考后，可测量左右任一侧的一级特征线。</p></div>}
             </div>
             <div className={`fit-summary ${fit ? "has-fit" : ""}`}>
-              {fit ? <><small>由 {records.length} 条一级读数联合拟合</small><strong>d = {fit.dUm.toFixed(3)} μm</strong><span>{linesPerMm} 线/mm · RMSE {fit.rmseNm.toFixed(2)} nm</span><p><CheckCircle2 size={16} />{errorText}</p><button onClick={() => navigate("guide")}>继续实验流程 <ArrowRight size={15} /></button></> : <><Aperture size={28} /><strong>等待两条有效谱线</strong><p>零级差值会自动用于每条一级读数的衍射角计算。</p></>}
+              {fit ? <><small>由 {records.length} 条一级读数联合拟合</small><strong>d = {fit.dUm.toFixed(3)} μm</strong><span>{linesPerMm} 线/mm · RMSE {fit.rmseNm.toFixed(2)} nm</span><p><CheckCircle2 size={16} />{errorText}</p><button onClick={() => navigate("analysis")}>打开图像分析 <ArrowRight size={15} /></button></> : <><Aperture size={28} /><strong>等待两条有效谱线</strong><p>零级差值会自动用于每条一级读数的衍射角计算。</p></>}
             </div>
           </div>
           <p className={`error-explainer ${records.length ? "has-data" : ""}`}><CircleAlert size={17} /><span><b>当前诊断：</b>{errorText}。系统会保留真实读数与偏差，便于复核零级、法线与像质条件。</span></p>
@@ -1122,24 +1127,6 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
             </div>
           </section>
 
-          <section className="vernier-card">
-            <div className="side-card-heading"><span><Gauge size={17} />双游标读数</span><small>分辨率 1′</small></div>
-            <div className="vernier-values"><div><span>游标 A</span><strong>{formatDms(rawReadings.a)}</strong></div><div><span>游标 B</span><strong>{formatDms(rawReadings.b)}</strong></div></div>
-            <p>平均读数：<b>{formatDms(rawReadings.mean)}</b> · {zeroReference ? `零级参考：${formatDms(zeroReference.mean)}` : "尚未建立零级参考"}</p>
-          </section>
-
-          <section className="guide-card">
-            <div className="guide-card-head"><span><span className="guide-step-number">{step + 1}</span>实验引导</span><small>按步骤完成即可</small></div>
-            <p><Lightbulb size={17} />{instruction}</p>
-            <div className="guide-checks">
-              <span className={focusReady && slitReady ? "done" : ""}>{focusReady && slitReady ? <Check size={14} /> : <i />}狭缝与焦距</span>
-              <span className={stageReady ? "done" : ""}>{stageReady ? <Check size={14} /> : <i />}光栅法线</span>
-              <span className={zeroReference?.aligned ? "done" : ""}>{zeroReference?.aligned ? <Check size={14} /> : <i />}零级参考</span>
-              <span className={records.length >= 2 ? "done" : ""}>{records.length >= 2 ? <Check size={14} /> : <i />}两条谱线</span>
-            </div>
-            <button className="record-line-button" onClick={captureLine}><Target size={17} />记录当前目标谱线</button>
-            <small className="lab-message">{lastMessage}</small>
-          </section>
         </aside>
       </section>
     </div>
