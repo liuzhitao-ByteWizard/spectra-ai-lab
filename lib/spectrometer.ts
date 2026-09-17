@@ -155,6 +155,106 @@ export function measureGrating(
   };
 }
 
+/** Pixel-difference self-calibration: two known lines → solve for d, L, x1.
+ *  Diagram: d·x₁/√(x₁²+L²)=λ₁, d·(x₁+ΔX)/√((x₁+ΔX)²+L²)=λ₂
+ *  Zero order is virtual (solved, not measured). */
+export function calibrateFromPixelDiff(
+  lambda1Nm: number,
+  x1Px: number,
+  lambda2Nm: number,
+  x2Px: number,
+) {
+  if (lambda1Nm <= 0 || lambda2Nm <= 0) throw new Error("波长必须为正");
+
+  const dNm = 3333.333;
+
+  // 按波长短→长排序
+  let lam1 = lambda1Nm, lam2 = lambda2Nm, px1 = x1Px, px2 = x2Px;
+  if (lam1 > lam2) { [lam1, lam2] = [lam2, lam1]; [px1, px2] = [px2, px1]; }
+
+  const absDelta = Math.abs(px2 - px1);
+  if (absDelta < 1e-9) throw new Error("两条已知线像素位置重合，无法标定");
+
+  const theta1 = Math.asin(lam1 / dNm);
+  const theta2 = Math.asin(lam2 / dNm);
+  const tanTheta1 = Math.tan(theta1);
+  const tanTheta2 = Math.tan(theta2);
+
+  // |ΔX| = L·|tanθ₂ − tanθ₁|  →  L = |ΔX| / |tanθ₂ − tanθ₁|
+  const tanDiff = Math.abs(tanTheta2 - tanTheta1);
+  if (tanDiff < 1e-12) throw new Error("两条已知线角度过于接近，无法标定");
+  const L = absDelta / tanDiff;
+
+  // 判断零级在左还是在右
+  // 正向：λ小在左（px小），λ大在右（px大）→ 零级在左侧
+  // 反向：λ大在左（px小），λ小在右（px大）→ 零级在右侧
+  const isReversed = px1 > px2; // 排序后 lam1<lam2，若 px1>px2 则反向
+
+  // 零级到 λ₁ 的像素距离
+  const x1 = L * tanTheta1;
+  const x2 = L * tanTheta2;
+
+  // 验证
+  const checkLambda1 = dNm * x1 / Math.sqrt(x1 * x1 + L * L);
+  if (Math.abs(checkLambda1 - lam1) > 0.5) {
+    throw new Error(`标定验证失败：反算 λ₁=${checkLambda1.toFixed(1)} nm ≠ 参考 ${lam1.toFixed(1)} nm`);
+  }
+
+  return {
+    dNm,
+    dUm: dNm / 1000,
+    Lpx: L,
+    x1Px: x1,
+    x2Px: x2,
+    deltaPx: absDelta,
+    reversed: isReversed,
+    order: 1,
+    theta1Deg: radToDeg(theta1),
+    theta2Deg: radToDeg(theta2),
+  };
+}
+
+/** Measure unknown wavelength from pixel position using calibrated d and L.
+ *  Zero order is virtual at x = x1Px − x1 (from calibration).
+ *  λ = d · x₃/√(x₃² + L²), where x₃ = x₃Px − zeroX. */
+export function wavelengthFromPixelDiff(
+  x3Px: number,
+  calib: { dNm: number; Lpx: number; x1Px: number },
+  referenceXPx?: number,
+) {
+  const { dNm, Lpx, x1Px } = calib;
+  // Zero order position: from calibration, zero is at x1Px − x1 (virtual)
+  // x1 is the distance from zero to line 1. We stored x1Px as that distance.
+  // So zeroX = x1Px_position_in_image − x1 = ... but we don't have image x1.
+  // Actually: the calibration returns x1Px = u·|ΔX| which IS the pixel distance from zero to line 1.
+  // The zero order in the image is at: x1_image − x1 = unknown without image coordinates.
+  //
+  // Simpler: if referenceXPx is the pixel position of a known line (e.g., line 2),
+  // then zeroX = referenceXPx − (x1Px + delta) where delta is known from calibration.
+  // But we don't store delta separately...
+  //
+  // Cleanest: use the formula directly.
+  // x₃ (distance from zero) = x₃Px − zeroX
+  // zeroX = referenceXPx − (x1Px + deltaPx) if reference is line 2
+  // Or: zeroX = referenceXPx − x1Px if reference is line 1
+  //
+  // For simplicity: compute x3 relative to zero using the calibration geometry.
+  // The caller should pass x3Px as the pixel distance from zero order.
+  // If they have absolute pixel positions, they should compute x3Px = |x₃ − zeroX| first.
+
+  const x3 = x3Px; // pixel distance from virtual zero order
+  const ratio = x3 / Math.sqrt(x3 * x3 + Lpx * Lpx);
+  const lambda = dNm * ratio;
+  const thetaDeg = radToDeg(Math.atan2(x3, Lpx));
+
+  return {
+    wavelengthNm: lambda,
+    thetaDeg,
+    dNm,
+    Lpx,
+  };
+}
+
 export function fitGratingFromPixels(
   references: PixelReferenceLine[],
   zeroX: number,

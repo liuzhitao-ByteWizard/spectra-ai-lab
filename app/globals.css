@@ -589,6 +589,22 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 .marker-picker-head button:disabled { opacity: .45; cursor: not-allowed; }
 .marker-picker > p { margin: 11px 0 8px; font-size: 13px; line-height: 1.65; }
 .candidate-strip, .selected-markers { display: flex; flex-wrap: wrap; gap: 7px; }
+.unknown-line-measure { margin-top: 16px; padding: 16px; border: 1px solid #d8e4ef; border-radius: 14px; background: #f8fbff; }
+.unknown-line-measure > div:first-child { margin-bottom: 10px; }
+.unknown-line-measure strong { display: block; margin-bottom: 4px; color: #1b3550; font-size: 14px; }
+.unknown-line-measure p { margin: 0; color: #64768b; font-size: 13px; line-height: 1.55; }
+.wavelength-results { margin-top: 16px; padding: 16px; border: 1px solid #d8e4ef; border-radius: 14px; background: #f8fbff; }
+.wavelength-results > div:first-child { margin-bottom: 12px; }
+.wavelength-results strong { display: block; margin-bottom: 4px; color: #1b3550; font-size: 14px; }
+.wavelength-results p { margin: 0; color: #64768b; font-size: 13px; line-height: 1.55; }
+.wavelength-table { overflow-x: auto; }
+.wavelength-table > div { display: grid; grid-template-columns: auto auto auto auto auto 1fr; gap: 8px 16px; align-items: center; padding: 8px 0; border-bottom: 1px solid #e8eef4; font-size: 13px; }
+.wavelength-table > div:first-child { color: #708298; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border-bottom-color: #d0dce8; }
+.wavelength-table span { display: inline-flex; align-items: center; gap: 5px; color: #3a526b; }
+.wavelength-table i { width: 3px; height: 14px; border-radius: 3px; display: inline-block; }
+.wavelength-table strong { color: #1b3550; font-weight: 700; }
+.wavelength-table strong.error { color: #d8393e; }
+.wavelength-table .via { color: #8998a7; font-size: 11px; }
 .candidate-strip button, .selected-markers button { min-height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; color: #38536b; background: white; border: 1px solid #d6e2ed; border-radius: 8px; font-size: 12px; }
 .candidate-strip button:hover, .selected-markers button:hover { border-color: #6fa9dc; background: #f0f8ff; }
 .candidate-strip i, .selected-markers i { width: 3px; height: 17px; border-radius: 3px; box-shadow: 0 0 5px currentColor; }
