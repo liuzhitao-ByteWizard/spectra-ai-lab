@@ -55,7 +55,7 @@ const analysisPipeline = [
   { title: "图像校正", detail: "倾斜 0.7°", icon: SlidersHorizontal },
   { title: "峰值检测", detail: "自适应条数", icon: Waves },
   { title: "谱线匹配", detail: "Hg-I · 97.6%", icon: Target },
-  { title: "游标反演", detail: "未知 d", icon: BarChart3 },
+  { title: "波长反演", detail: "未知 λ", icon: BarChart3 },
 ];
 
 const degreesFromReading = (value: string) => {
@@ -382,7 +382,7 @@ const AnalysisGlassPanel = memo(function AnalysisGlassPanel() {
       </div>
       <div className="analysis-summary">
         <span><small>拟合质量</small><strong>RMSE 0.42 nm</strong></span>
-        <span><small>反演结果</small><strong>300.2 线/mm</strong></span>
+        <span><small>反演波长</small><strong>435.8 nm</strong></span>
       </div>
     </aside>
   );
@@ -426,8 +426,8 @@ function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
         <div className="hero-noise" aria-hidden="true" />
         <div className="hero-copy">
           <p className="eyebrow">AI + 物理实验</p>
-          <h1>基于三维虚拟仿真与AI图像分析的分光计参数反演实验系统</h1>
-          <p>使用虚拟仪器熟悉分光计操作，再用真实照片完成零级定位、汞线匹配与光栅常数反演。</p>
+          <h1>基于三维虚拟仿真与AI图像分析的分光计波长反演实验系统</h1>
+          <p>使用虚拟仪器熟悉分光计操作，再用真实照片完成零级定位、谱线匹配与未知波长反演。</p>
           <div className="hero-actions"><button className="primary-action" onClick={() => navigate("simulator")}><Play size={18} />开始虚拟预习</button><button className="secondary-action" onClick={() => navigate("analysis")}><ScanLine size={17} />进入图像分析</button></div>
         </div>
         <AnalysisGlassPanel />
@@ -435,7 +435,7 @@ function HomeModule({ navigate }: { navigate: (id: ModuleId) => void }) {
       </section>
       <section className="pain-grid">
         {[
-          { icon: Telescope, ask: "预习只看讲义，真机还是不会调？", answer: "先在虚拟分光计中瞄准、读数、拟合 d。", target: "simulator" as ModuleId },
+          { icon: Telescope, ask: "预习只看讲义，真机还是不会调？", answer: "先在虚拟分光计中瞄准、读数、反演波长。", target: "simulator" as ModuleId },
           { icon: ScanLine, ask: "零级、黄双线或照片质量，错在哪不清楚？", answer: "真实图像自动质检与认线，阻塞原因直接给出证据。", target: "analysis" as ModuleId },
           { icon: History, ask: "做完只剩一个结果，过程无法复盘？", answer: "保存峰值、匹配、拟合与诊断，按时间轴回放。", target: "records" as ModuleId },
         ].map((item, index) => <button className="pain-card" key={item.ask} onClick={() => navigate(item.target)}><span className="pain-number">0{index + 1}</span><item.icon size={22} /><strong>{item.ask}</strong><p>{item.answer}</p><em>打开模块 <ArrowRight size={14} /></em></button>)}
