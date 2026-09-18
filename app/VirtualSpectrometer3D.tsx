@@ -9,7 +9,7 @@ import {
   Maximize2, Move3D, Rotate3D, RotateCcw, SlidersHorizontal, Target, Telescope,
 } from "lucide-react";
 import { toast } from "sonner";
-import { measureGrating, SPECTRAL_LIBRARY, type MeasurementLine, type SpectrumLine } from "@/lib/spectrometer";
+import { SPECTRAL_LIBRARY, type SpectrumLine } from "@/lib/spectrometer";
 import type { ExperimentJourney } from "@/lib/experiment-journey";
 
 type ModuleId = "home" | "simulator" | "assistant" | "analysis" | "records";
@@ -306,11 +306,11 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               ? `零级基准：${formatDms(zeroReference.mean)}；可重新标定。`
               : "零级线已在叉丝中心，可记录基准。";
   const usableReadings = records.filter((record) => record.thetaDeg > .01);
-  const fit = useMemo(() => {
-    if (usableReadings.length < 2) return null;
-    try {
-      return measureGrating(usableReadings.map((record) => ({ wavelengthNm: record.wavelengthNm, thetaDeg: record.thetaDeg })));
-    } catch { return null; }
+  const wavelengthResult = useMemo(() => {
+    if (!usableReadings.length) return null;
+    const meanNm = usableReadings.reduce((sum, record) => sum + record.calculatedNm, 0) / usableReadings.length;
+    const rmseNm = Math.sqrt(usableReadings.reduce((sum, record) => sum + (record.calculatedNm - record.wavelengthNm) ** 2, 0) / usableReadings.length);
+    return { meanNm, rmseNm };
   }, [usableReadings]);
   const errorText = useMemo(() => {
     if (!records.length) return "尚无谱线读数";
@@ -326,11 +326,11 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       prelab: {
         source: "mercury",
         capturedLines: lightSource === "mercury" ? records.length : 0,
-        dUm: lightSource === "mercury" ? fit?.dUm ?? null : null,
-        rmseNm: lightSource === "mercury" ? fit?.rmseNm ?? null : null,
+        dUm: lightSource === "mercury" && records.length >= 2 ? 1_000 / linesPerMm : null,
+        rmseNm: lightSource === "mercury" ? wavelengthResult?.rmseNm ?? null : null,
       },
     });
-  }, [lightSource, records.length, fit?.dUm, fit?.rmseNm, updateJourney]);
+  }, [lightSource, records.length, linesPerMm, wavelengthResult?.rmseNm, updateJourney]);
 
   useEffect(() => {
     if (directedObservationOrder !== null && observationOrder !== directedObservationOrder) {
@@ -1037,8 +1037,8 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
             <div className="reading-table-wrap">
               {records.length ? <table className="virtual-reading-table"><thead><tr><th>光源</th><th>侧 / 级次</th><th>谱线</th><th>游标 A</th><th>游标 B</th><th>校正 θ</th><th>反算 λ</th><th>相对误差</th></tr></thead><tbody>{records.map((record) => <tr key={record.id} className={record.aligned ? "" : "has-warning"}><td>{LIGHT_SOURCES[record.source].shortName}</td><td>{record.order === 1 ? "右 +1" : "左 −1"}</td><td><i style={{ background: LIGHT_SOURCES[record.source].lines.find((line) => line.wavelengthNm === record.wavelengthNm)?.color }} />{record.wavelengthNm.toFixed(2)} nm · {record.label}</td><td>{formatDms(record.raw.a)}</td><td>{formatDms(record.raw.b)}</td><td>{record.thetaDeg.toFixed(3)}°</td><td>{record.calculatedNm.toFixed(2)} nm</td><td>{record.errorPercent >= 0 ? "+" : ""}{record.errorPercent.toFixed(2)}%</td></tr>)}</tbody></table> : <div className="measurement-empty"><Telescope size={27} /><strong>尚未记录谱线</strong><p>对准零级并记录参考后，可测量左右任一侧的一级特征线。</p></div>}
             </div>
-            <div className={`fit-summary ${fit ? "has-fit" : ""}`}>
-              {fit ? <><small>由 {records.length} 条一级读数联合拟合</small><strong>d = {fit.dUm.toFixed(3)} μm</strong><span>{linesPerMm} 线/mm · RMSE {fit.rmseNm.toFixed(2)} nm</span><p><CheckCircle2 size={16} />{errorText}</p><button onClick={() => navigate("analysis")}>打开图像分析 <ArrowRight size={15} /></button></> : <><Aperture size={28} /><strong>等待两条有效谱线</strong><p>零级差值会自动用于每条一级读数的衍射角计算。</p></>}
+            <div className={`fit-summary ${wavelengthResult ? "has-fit" : ""}`}>
+              {wavelengthResult ? <><small>由 {records.length} 条一级读数求平均</small><strong>λ̄ = {wavelengthResult.meanNm.toFixed(2)} nm</strong><span>已知光栅 {linesPerMm} 线/mm · RMSE {wavelengthResult.rmseNm.toFixed(2)} nm</span><p><CheckCircle2 size={16} />{errorText}</p><button onClick={() => navigate("analysis")}>打开图像分析 <ArrowRight size={15} /></button></> : <><Aperture size={28} /><strong>等待波长读数</strong><p>零级差值与已知光栅间距会自动计算 λ = d sin θ。</p></>}
             </div>
           </div>
           <p className={`error-explainer ${records.length ? "has-data" : ""}`}><CircleAlert size={17} /><span><b>当前诊断：</b>{errorText}。系统会保留真实读数与偏差，便于复核零级、法线与像质条件。</span></p>
