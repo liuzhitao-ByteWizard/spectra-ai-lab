@@ -59,6 +59,7 @@ type SceneRuntime = {
   beams: THREE.Group;
   slitJaws: THREE.Mesh[];
   lamp: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  lampHalo: THREE.PointLight;
   animationFrame: number;
 };
 
@@ -723,6 +724,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       beams,
       slitJaws: [upperSlitJaw, lowerSlitJaw],
       lamp,
+      lampHalo,
       animationFrame: 0,
     };
     runtimeRef.current = runtime;
@@ -767,8 +769,12 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const jawCenter = .09 + slitOptics.jawGap / 2;
     runtime.slitJaws[0].position.y = jawCenter;
     runtime.slitJaws[1].position.y = -jawCenter;
-    runtime.lamp.material.emissiveIntensity = lampOn ? 2.2 : .05;
-    runtime.lamp.material.color.set(lampOn ? sourceProfile.beamColor : "#293845");
+    const sourceColor = sourceProfile.beamColor;
+    runtime.lamp.material.emissiveIntensity = lampOn ? 2.2 : 0;
+    runtime.lamp.material.color.set(lampOn ? sourceColor : "#293845");
+    runtime.lamp.material.emissive.set(lampOn ? sourceColor : "#08090e");
+    runtime.lampHalo.color.set(sourceColor);
+    runtime.lampHalo.intensity = lampOn ? 2.7 : 0;
     while (runtime.beams.children.length) {
       const child = runtime.beams.children.pop();
       if (child) disposeObject(child);
