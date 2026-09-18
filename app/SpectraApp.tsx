@@ -6,8 +6,9 @@ import {
   Aperture, ArrowLeft, ArrowRight, BarChart3, BookOpen, Bot, Camera,
   CheckCircle2, ChevronRight, CircleAlert, CircleHelp, ClipboardCheck, Clock3,
   Download, ExternalLink, FileText, FlaskConical, History, Home,
-  LogIn, LogOut, MessageCircle, Microscope, Play, RotateCcw, Save,
-  ScanLine, Send, SlidersHorizontal, Target, Telescope, Upload, Users, Waves,
+  ImagePlus, LoaderCircle, LogIn, LogOut, MessageCircle, Microscope, Play,
+  RotateCcw, Save, ScanLine, Send, Sigma, SlidersHorizontal, Target, Telescope,
+  Upload, Users, Waves,
 } from "lucide-react";
 import { toast } from "sonner";
 import Image from "next/image";
@@ -22,6 +23,17 @@ import {
   wavelengthFromPixelDiff,
 } from "@/lib/spectrometer";
 import {
+  analyzeSpectrumOffline,
+  MERCURY_LINES,
+  lineDisplayName,
+  PartialAnalysisError,
+  type CalibrationResult,
+  type DetectedPeak,
+  type ManualPoint,
+  type MatchedLine,
+  type MercuryLineKey,
+} from "@/lib/offline-spectrum-analysis";
+import {
   RecordRequestError, requestRecordJson, type ExperimentImageSlot,
   type ExperimentTask, type RecordSnapshot, type SavedRecord,
 } from "@/lib/experiment-record";
@@ -33,6 +45,7 @@ const VirtualSpectrometer3D = dynamic(() => import("./VirtualSpectrometer3D"), {
 });
 
 type ModuleId = "home" | "simulator" | "assistant" | "analysis" | "records";
+type DemoStatus = "idle" | "ready" | "loading" | "complete" | "error";
 type Peak = { x: number; xRatio: number; family: string; color: string; confidence: number; prominence: number; widthPx: number; wavelengthNm?: number };
 type DetectorOptions = { prominence: number; minDistancePx: number };
 type SpectrumSource = {
@@ -454,7 +467,7 @@ function SimulatorModule({ journey, navigate, updateJourney }: { journey: Experi
   return <VirtualSpectrometer3D journey={journey} navigate={navigate} updateJourney={updateJourney} />;
 }
 
-const OPENMAIC_URL = process.env.NEXT_PUBLIC_OPENMAIC_URL?.trim();
+const OPENMAIC_URL = process.env.NEXT_PUBLIC_OPENMAIC_URL?.trim() || "http://localhost:3001";
 const HOSTED_OPENMAIC_URL = "https://open.maic.chat";
 const isLoopbackClassroomUrl = (url: string) => {
   try {
@@ -785,289 +798,747 @@ function useExperimentSync({
   return { phase, lastSyncedAt, errorMessage, currentSnapshotSynced, retryLoad, syncNow, resetSync };
 }
 
+function StatusPill({ status }: { status: DemoStatus }) {
+  const label = ({ idle: "待上传", ready: "可运行", loading: "分析中", complete: "已完成", error: "需处理" } as Record<DemoStatus, string>)[status] || "待上传";
+  return <em className={`status-pill ${status}`}>{label}</em>;
+}
+
+function DemoMessage({ tone, text }: { tone: "error" | "warn"; text: string }) {
+  return <div className={`message ${tone}`}><CircleAlert size={17} /><span>{text}</span></div>;
+}
+
+function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return <div className={`metric ${tone || "ink"}`}><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function ImageStage({
+  preview,
+  annotations,
+  width,
+  manualPoints,
+  onAddManualPoint,
+}: {
+  preview: string;
+  annotations: { type: string; x: number; label: string; color: string }[];
+  width?: number;
+  manualPoints?: ManualPoint[];
+  onAddManualPoint?: (x: number) => void;
+}) {
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [naturalWidth, setNaturalWidth] = useState(0);
+  const [naturalHeight, setNaturalHeight] = useState(0);
+  const [box, setBox] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const node = stageRef.current;
+    if (!node) return;
+    const update = () => {
+      const rect = node.getBoundingClientRect();
+      setBox({ width: rect.width, height: rect.height });
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const image = stageRef.current?.querySelector("img");
+    if (!image) return;
+    const onLoad = () => {
+      setNaturalWidth(image.naturalWidth || 0);
+      setNaturalHeight(image.naturalHeight || 0);
+    };
+    if (image.complete) onLoad();
+    image.addEventListener("load", onLoad);
+    return () => image.removeEventListener("load", onLoad);
+  }, [preview]);
+
+  const fit = useMemo(() => {
+    const imageWidth = width || naturalWidth;
+    if (!box.width || !box.height || !imageWidth || !naturalHeight) return { left: 0, top: 0, width: box.width, height: box.height };
+    const ratio = imageWidth / naturalHeight;
+    const stageRatio = box.width / box.height;
+    if (ratio > stageRatio) {
+      const height = box.width / ratio;
+      return { left: 0, top: (box.height - height) / 2, width: box.width, height };
+    }
+    const widthFit = box.height * ratio;
+    return { left: (box.width - widthFit) / 2, top: 0, width: widthFit, height: box.height };
+  }, [naturalHeight, box.height, box.width, width]);
+
+  const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!onAddManualPoint || !preview) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const rect = stage.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+    if (localX < fit.left || localX > fit.left + fit.width || localY < fit.top || localY > fit.top + fit.height) return;
+    const imageWidth = width || naturalWidth || fit.width;
+    onAddManualPoint(((localX - fit.left) / fit.width) * imageWidth);
+  };
+
+  const imageWidth = width || naturalWidth;
+  const markers = [
+    ...annotations,
+    ...(manualPoints ?? []).map((point) => ({ type: "manual", x: point.x, label: point.label, color: point.color })),
+  ];
+
+  if (!preview) {
+    return (
+      <div className="empty-stage">
+        <ImagePlus size={42} />
+        <strong>等待光谱照片</strong>
+        <span>建议使用一级光谱，谱线清晰、不过曝，至少包含 3 条有效谱线。</span>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={stageRef} className={`image-stage ${onAddManualPoint ? "is-clickable" : ""}`} onClick={handleClick}>
+      <div className="image-wrap">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={preview} alt="光谱照片预览" onLoad={(event) => setNaturalWidth(event.currentTarget.naturalWidth || 0)} />
+        {markers.map((marker, index) => (
+          <span
+            key={`${marker.type}-${marker.x}-${index}`}
+            className={`marker ${marker.type}`}
+            style={{
+              left: `${fit.left + (imageWidth ? marker.x / imageWidth * fit.width : fit.width / 2)}px`,
+              top: `${fit.top + fit.height * 0.22}px`,
+              height: `${fit.height * 0.58}px`,
+              "--marker-color": marker.color || "#1f7a5a",
+            } as React.CSSProperties}
+            title={marker.label}
+            aria-label={marker.label}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ManualPanel({
+  selectedLineKey,
+  onSelectedLineKey,
+  manualPoints,
+  onRemoveManualPoint,
+  onClearManualPoints,
+  detectedPeaks,
+  onAddManualPoint,
+  disabled,
+}: {
+  selectedLineKey: MercuryLineKey;
+  onSelectedLineKey: (key: MercuryLineKey) => void;
+  manualPoints: ManualPoint[];
+  onRemoveManualPoint: (key: string) => void;
+  onClearManualPoints: () => void;
+  detectedPeaks: DetectedPeak[];
+  onAddManualPoint: (x: number) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="manual-panel">
+      <div className="manual-head">
+        <label>
+          <span>选择要标定的谱线</span>
+          <select value={selectedLineKey} onChange={(event) => onSelectedLineKey(event.target.value as MercuryLineKey)} disabled={disabled}>
+            {MERCURY_LINES.map((line) => <option key={line.key} value={line.key}>{line.colorName}</option>)}
+          </select>
+        </label>
+        <button type="button" onClick={onClearManualPoints} disabled={!manualPoints.length}>清空</button>
+      </div>
+      <p>先选择谱线，再点击照片中对应亮线中心。手动选择 3 条以上时，系统会优先使用这些标定点。</p>
+      {!!detectedPeaks.length && (
+        <div className="candidate-panel">
+          <strong>自动检测到的候选峰</strong>
+          <div className="candidate-list">
+            {detectedPeaks.map((peak, index) => (
+              <button key={`${peak.x}-${index}`} type="button" onClick={() => onAddManualPoint(peak.x)} disabled={disabled}>
+                <i style={{ background: peak.color }} />
+                {peak.colorName} · x={peak.x.toFixed(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="manual-list">
+        {manualPoints.length
+          ? manualPoints.map((point) => (
+            <span key={point.key}>
+              <i style={{ background: point.color }} />
+              {point.label}: {point.x.toFixed(1)} px
+              <button type="button" onClick={() => onRemoveManualPoint(point.key)}>删除</button>
+            </span>
+          ))
+          : <em>尚未手动选择谱线。</em>}
+      </div>
+    </div>
+  );
+}
+
+function ProfileChart({ result }: { result: CalibrationResult | null }) {
+  const imageWidth = result?.summary?.imageWidth || 1100;
+  const points = (result?.profile ?? []).map((point) => `${60 + point.x / imageWidth * 860},${300 - point.y * 220}`).join(" ");
+  return (
+    <svg viewBox="0 0 980 330" className="profile-chart" role="img" aria-label="光强剖面">
+      <rect x="0" y="0" width="980" height="330" rx="18" />
+      {[0, 1, 2, 3].map((index) => <line key={index} x1="60" x2="920" y1={82 + index * 56} y2={82 + index * 56} />)}
+      <line x1="60" x2="920" y1="300" y2="300" />
+      {points && <polyline points={points} />}
+      {(result?.annotations ?? []).map((annotation, index) => (
+        <g key={`${annotation.x}-${index}`}>
+          <line className="peak-line" x1={60 + annotation.x / imageWidth * 860} x2={60 + annotation.x / imageWidth * 860} y1="54" y2="306" stroke={annotation.color} />
+          <text x={64 + annotation.x / imageWidth * 860} y="48">{annotation.label}</text>
+        </g>
+      ))}
+      {!result && <text className="empty-chart" x="330" y="185">完成分析后显示光强曲线与峰位</text>}
+    </svg>
+  );
+}
+
+function ResidualList({ rows }: { rows: MatchedLine[] }) {
+  if (!rows.length) return <p className="empty-note">完成汞灯标定后，这里显示每条标准谱线的预测值和残差。</p>;
+  return (
+    <div className="residual-list">
+      {rows.map((row) => (
+        <article key={row.id} className="residual-item">
+          <div><i style={{ background: row.color }} /><strong>{lineDisplayName(row.matchKey)}</strong></div>
+          <span>x={row.x.toFixed(1)} px</span>
+          <span>标准 {row.standardNm.toFixed(2)} nm</span>
+          <span>预测 {row.predictedNm.toFixed(2)} nm</span>
+          <em>残差 {row.residualNm > 0 ? "+" : ""}{row.residualNm.toFixed(2)} nm</em>
+          <b className={`badge ${row.statusKey}`}>{row.status}</b>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ProcessingPanel({ result }: { result: CalibrationResult | null }) {
+  const processing = result?.processing;
+  const peaks = result?.detectedPeaks ?? [];
+  return (
+    <div className="table-card result-panel processing-panel">
+      <h3>图像处理全过程</h3>
+      {processing ? (
+        <>
+          <div className="process-steps">
+            {processing.steps?.map((step, index) => (
+              <div key={`${step.name}-${index}`} className="process-step">
+                <b>{index + 1}</b>
+                <div>
+                  <strong>{step.name}</strong>
+                  <span>{step.detail}</span>
+                </div>
+                {step.count !== null && step.count !== undefined && <em>{step.count}</em>}
+              </div>
+            ))}
+          </div>
+          <div className="process-summary">
+            <span>候选峰 {processing.candidateCount ?? 0}</span>
+            <span>保留峰 {processing.detectedCount ?? 0}</span>
+            <span>可用峰 {processing.usableCount ?? 0}</span>
+            <span>匹配谱线 {processing.matchedCount ?? 0}</span>
+          </div>
+          {processing.fallbackMessage ? (
+            <p className={`fallback-note ${processing.fallbackRequired ? "warn" : "ok"}`}>{processing.fallbackMessage}</p>
+          ) : null}
+          {!!peaks.length && (
+            <div className="detected-peaks">
+              {peaks.map((peak, index) => (
+                <span key={`${peak.x}-${index}`}>
+                  <i style={{ background: peak.color }} />
+                  {peak.colorName} x={peak.x.toFixed(1)} 强度={peak.height.toFixed(2)}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="empty-note">执行标定后显示：光强提取、峰值检测、近邻峰解混、匹配与残差计算。</p>
+      )}
+    </div>
+  );
+}
+
+function ResultsGrid({ result, lineResiduals }: { result: CalibrationResult | null; lineResiduals: MatchedLine[] }) {
+  const overview = !result?.calibration
+    ? (
+      <div className="result-overview is-empty">
+        <div>
+          <h3>结果总览</h3>
+          <p>执行标定后，关键参数、波长结果、残差和图像处理过程会集中显示在这里。</p>
+        </div>
+      </div>
+    )
+    : (
+      <div className="result-overview">
+        <Metric label="RMSE" value={`${(result.summary.rmseNm ?? 0).toFixed(2)} nm`} tone="green" />
+        <Metric label="最大残差" value={`${(result.summary.maxAbsResidualNm ?? 0).toFixed(2)} nm`} tone="gold" />
+        <Metric label="x₀" value={`${result.calibration.x0Px.toFixed(1)} px`} tone="blue" />
+        <Metric label="谱线数" value={`${result.calibration.sourceLineCount} 条`} tone="ink" />
+      </div>
+    );
+
+  return (
+    <section className="results-grid">
+      {overview}
+      <div className="chart-card result-panel results-chart">
+        <h3>光强剖面与谱线标注</h3>
+        <ProfileChart result={result} />
+      </div>
+      <div className="table-card result-panel wavelength-panel">
+        <h3>最终波长结果</h3>
+        {lineResiduals.length ? (
+          <div className="wavelength-strip">
+            {lineResiduals.map((line) => (
+              <div key={line.id} className="wavelength-chip">
+                <i style={{ background: line.color }} />
+                <span>{lineDisplayName(line.matchKey)}</span>
+                <strong>{line.predictedNm.toFixed(2)} nm</strong>
+                <em>x={line.x.toFixed(1)} px，残差 {line.residualNm.toFixed(2)} nm</em>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="empty-note">完成自动标定或手动标定后，这里会列出每条谱线的波长结果。</p>
+        )}
+      </div>
+      <div className="table-card result-panel residual-panel">
+        <h3>标定残差复核</h3>
+        <ResidualList rows={lineResiduals} />
+      </div>
+      <ProcessingPanel result={result} />
+    </section>
+  );
+}
+
+function ExperimentCard({
+  title,
+  subtitle,
+  preview,
+  result,
+  status,
+  error,
+  inputRef,
+  onFile,
+  onRun,
+  runLabel,
+  mode,
+  selectedLineKey,
+  onSelectedLineKey,
+  manualPoints,
+  onAddManualPoint,
+  onRemoveManualPoint,
+  onClearManualPoints,
+  detectedPeaks,
+  disabled = false,
+}: {
+  title: string;
+  subtitle: string;
+  preview: string;
+  result: CalibrationResult | null;
+  status: DemoStatus;
+  error: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onFile: (file?: File) => void;
+  onRun: () => void;
+  runLabel: string;
+  mode?: "calibration";
+  selectedLineKey?: MercuryLineKey;
+  onSelectedLineKey?: (key: MercuryLineKey) => void;
+  manualPoints?: ManualPoint[];
+  onAddManualPoint?: (x: number) => void;
+  onRemoveManualPoint?: (key: string) => void;
+  onClearManualPoints?: () => void;
+  detectedPeaks?: DetectedPeak[];
+  disabled?: boolean;
+}) {
+  const showCandidates = Boolean(result?.processing?.fallbackRequired && !result?.calibration);
+  const annotations = [
+    ...(result?.annotations ?? []),
+    ...(showCandidates
+      ? (detectedPeaks ?? []).filter((peak) => !(result?.annotations ?? []).some((line) => Math.abs(line.x - peak.x) < 2))
+        .map((peak) => ({ type: "candidate", x: peak.x, label: `${peak.colorName} ${peak.x.toFixed(0)}px`, color: peak.color }))
+      : []),
+  ];
+
+  return (
+    <section
+      className={`experiment-card ${disabled ? "is-disabled" : ""}`}
+      onDragEnter={(event) => {
+        event.preventDefault();
+        const node = event.currentTarget;
+        node.dataset.dragDepth = String((Number(node.dataset.dragDepth) || 0) + 1);
+        node.classList.add("is-dragover");
+      }}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={(event) => {
+        const node = event.currentTarget;
+        const depth = Math.max(0, (Number(node.dataset.dragDepth) || 1) - 1);
+        node.dataset.dragDepth = String(depth);
+        if (!depth) node.classList.remove("is-dragover");
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        const node = event.currentTarget;
+        node.dataset.dragDepth = "0";
+        node.classList.remove("is-dragover");
+        if (disabled) return;
+        const dropped = event.dataTransfer?.files?.[0];
+        if (dropped) onFile(dropped);
+      }}
+    >
+      <div className="card-title">
+        <ScanLine size={20} />
+        <div>
+          <h3>{title}</h3>
+          <span>{subtitle}</span>
+        </div>
+        <StatusPill status={status} />
+      </div>
+      <ImageStage
+        preview={preview}
+        annotations={annotations}
+        width={result?.summary?.imageWidth}
+        manualPoints={manualPoints}
+        onAddManualPoint={mode === "calibration" ? onAddManualPoint : undefined}
+      />
+      {mode === "calibration" && onSelectedLineKey && onRemoveManualPoint && onClearManualPoints && onAddManualPoint && (
+        <ManualPanel
+          selectedLineKey={selectedLineKey ?? "green"}
+          onSelectedLineKey={onSelectedLineKey}
+          manualPoints={manualPoints ?? []}
+          onRemoveManualPoint={onRemoveManualPoint}
+          onClearManualPoints={onClearManualPoints}
+          detectedPeaks={detectedPeaks ?? []}
+          onAddManualPoint={onAddManualPoint}
+          disabled={disabled || !preview}
+        />
+      )}
+      <div className="button-row">
+        <label className={`secondary-button file-button ${disabled ? "disabled" : ""}`}>
+          <ImagePlus size={17} /> 上传照片 或拖拽到此处
+          <input ref={inputRef} type="file" accept="image/*" onChange={(event) => onFile(event.target.files?.[0])} disabled={disabled} />
+        </label>
+        <button type="button" className="primary-button" onClick={onRun} disabled={disabled || status === "loading"}>
+          {status === "loading" ? <LoaderCircle className="spin" size={17} /> : <Play size={17} />}
+          {runLabel}
+        </button>
+      </div>
+      {error && <DemoMessage tone="error" text={error} />}
+      {!!result?.warnings?.length && <DemoMessage tone="warn" text={result.warnings.join(" ")} />}
+    </section>
+  );
+}
+
 function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticated, finishExperiment }: { analyzeSignal?: number; journey: ExperimentJourney; updateJourney: (patch: Partial<ExperimentJourney>) => void; authenticated: boolean; finishExperiment: () => void }) {
   const task: ExperimentTask = "A";
-  const [detector, setDetector] = useState<DetectorOptions>({ prominence: .018, minDistancePx: 3 });
-  const [aSource, setASource] = useState<SpectrumSource | null>(() => analyzeSignal > 0 ? buildSampleSource() : null);
-  const [aMarkers, setAMarkers] = useState<ReferenceMarker[]>(() => analyzeSignal > 0 ? SPECTRAL_LIBRARY.mercury.map((line) => ({ wavelengthNm: line.wavelengthNm, xRatio: (100 + 4000 * Math.tan(Math.asin(line.wavelengthNm / 3333))) / 1000 })) : []);
-  const [selectedWavelength, setSelectedWavelength] = useState(546.07);
-  const [zeroSource, setZeroSource] = useState<SpectrumSource | null>(null);
-  const [zeroReading, setZeroReading] = useState("");
-  const [lineReadings, setLineReadings] = useState<Record<string, string>>({});
-  const [vernierResolutionArcmin, setVernierResolutionArcmin] = useState(1);
-  const [calibResult, setCalibResult] = useState<{ dNm: number; dUm: number; Lpx: number; x0Px: number; x1Px: number; x2Px: number; deltaPx: number; reversed: boolean; theta1Deg: number; theta2Deg: number; line1: { wavelengthNm: number; xPx: number }; line2: { wavelengthNm: number; xPx: number } } | null>(null);
-  const [unknownResult, setUnknownResult] = useState<{ lambdaNm: number; thetaDeg: number; x3Px: number } | null>(null);
-  const [aComplete, setAComplete] = useState(analyzeSignal > 0);
-  const [busy, setBusy] = useState(false);
+  const [dUmText, setDUmText] = useState("3.333");
+  const [prominence, setProminence] = useState(0.035);
+  const [minDistance, setMinDistance] = useState(8);
+  const [selectedLineKey, setSelectedLineKey] = useState<MercuryLineKey>("green");
+  const [manualPoints, setManualPoints] = useState<ManualPoint[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState("");
+  const [result, setResult] = useState<CalibrationResult | null>(null);
+  const [status, setStatus] = useState<DemoStatus>("idle");
+  const [errorMessage, setErrorMessage] = useState("");
   const [diagnosis, setDiagnosis] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const pendingImagesRef = useRef<PendingImages>({ A: {} });
-  const spectrumFileRef = useRef<HTMLInputElement>(null);
 
-  const aImage = useMemo(() => aSource ? detectSpectrumPeaks(aSource, detector) : null, [aSource, detector]);
-  const zeroReadingDeg = degreesFromReading(zeroReading);
-  const singleLineEstimate = useMemo(() => {
-    if (!calibResult || !aImage) return null;
-    return calibResult.dUm;
-  }, [calibResult, aImage]);
-  const usableReadings = useMemo(() => {
-    if (!aImage) return [];
-    return aMarkers.flatMap((marker) => {
-      const peak = aImage.peaks.reduce<Peak | null>((best, p) => !best || Math.abs(p.xRatio - marker.xRatio) < Math.abs(best.xRatio - marker.xRatio) ? p : best, null);
-      if (!peak) return [];
-      return [{ wavelengthNm: marker.wavelengthNm, xPx: peak.x, xRatio: peak.xRatio }];
-    });
-  }, [aImage, aMarkers]);
+  const lineResiduals = result?.lines ?? [];
+  const hasResult = Boolean(result?.calibration);
+  const blockReason = !file
+    ? "请上传光谱图"
+    : result?.processing?.fallbackRequired
+      ? result.processing.fallbackMessage
+      : hasResult
+        ? ""
+        : status === "ready"
+          ? "已具备标定数据，点击「执行标定」生成结果"
+          : "等待执行标定";
 
-  useEffect(() => () => { if (aSource?.preview) URL.revokeObjectURL(aSource.preview); }, [aSource?.preview]);
-  useEffect(() => () => { if (zeroSource?.preview) URL.revokeObjectURL(zeroSource.preview); }, [zeroSource?.preview]);
+  useEffect(() => () => {
+    if (preview.startsWith("blob:")) URL.revokeObjectURL(preview);
+  }, [preview]);
 
-  const loadSample = () => {
-    sync.resetSync();
-    const sample = buildSampleSource();
-    const positions = SPECTRAL_LIBRARY.mercury.map((line) => ({ wavelengthNm: line.wavelengthNm, xRatio: (100 + 4000 * Math.tan(Math.asin(line.wavelengthNm / 3333))) / sample.width }));
-    setASource(sample); setAMarkers(positions); setAComplete(true); setSelectedWavelength(546.07);
-    setCalibResult(null); setUnknownResult(null);
-  };
-  const uploadSpectrum = async (files?: FileList | File[]) => {
-    const file = files ? Array.from(files)[0] : null;
-    if (!file) return; setBusy(true);
+  const handleFile = useCallback((next?: File) => {
+    if (!next) return;
+    if (!next.type.startsWith("image/")) {
+      setErrorMessage("请上传 JPG 或 PNG 光谱照片。");
+      return;
+    }
+    if (preview.startsWith("blob:")) URL.revokeObjectURL(preview);
+    setFile(next);
+    setPreview(URL.createObjectURL(next));
+    setResult(null);
+    setErrorMessage("");
+    setStatus("ready");
+    setManualPoints([]);
+    pendingImagesRef.current.A.primary = next;
+  }, [preview]);
+
+  const addManualPoint = useCallback((x: number) => {
+    const standard = MERCURY_LINES.find((line) => line.key === selectedLineKey);
+    if (!standard) return;
+    setManualPoints((points) => [
+      ...points.filter((point) => point.key !== selectedLineKey),
+      { key: selectedLineKey, label: standard.colorName, color: standard.color, wavelength: standard.wavelength, x },
+    ].sort((a, b) => a.x - b.x));
+    setResult(null);
+    setStatus((value) => value === "complete" ? "ready" : value);
+  }, [selectedLineKey]);
+
+  const removeManualPoint = useCallback((key: string) => {
+    setManualPoints((points) => points.filter((point) => point.key !== key));
+    setResult(null);
+  }, []);
+
+  const resetDemo = useCallback(() => {
+    if (preview.startsWith("blob:")) URL.revokeObjectURL(preview);
+    setFile(null);
+    setPreview("");
+    setResult(null);
+    setStatus("idle");
+    setErrorMessage("");
+    setManualPoints([]);
+    setDUmText("3.333");
+    setProminence(0.035);
+    setMinDistance(8);
+    pendingImagesRef.current = { A: {} };
+    if (inputRef.current) inputRef.current.value = "";
+  }, [preview]);
+
+  const runCalibration = useCallback(async () => {
+    if (!file) {
+      setErrorMessage("请先上传汞灯一级光谱照片。");
+      setStatus("error");
+      return;
+    }
+    setStatus("loading");
+    setErrorMessage("");
+    setResult(null);
     try {
-      const source = await analyzeImageFile(file);
-      const analyzed = detectSpectrumPeaks(source, detector);
-      const automaticMarkers = autoMatchMercuryPeaks(analyzed);
-      pendingImagesRef.current.A.primary = file;
-      setASource(source); setAMarkers(automaticMarkers); setAComplete(false);
-      setCalibResult(null); setUnknownResult(null);
-      toast.success(automaticMarkers.length >= 2 ? `已识别候选谱线并匹配 ${automaticMarkers.length} 条参考线` : "图像读取完成，请补充或修正参考线标记");
-    } catch (error) { toast.error(error instanceof Error ? error.message : "图像分析失败"); }
-    finally { setBusy(false); }
-  };
-
-  const addMarker = (ratio: number) => {
-    if (!aImage) return;
-    const clickedX = ratio * aImage.width;
-    const nearest = aImage.peaks.reduce<Peak | null>((best, peak) => !best || Math.abs(peak.x - clickedX) < Math.abs(best.x - clickedX) ? peak : best, null);
-    const xRatio = nearest && Math.abs(nearest.x - clickedX) <= detector.minDistancePx ? nearest.xRatio : ratio;
-    const update = (items: ReferenceMarker[]) => [...items.filter((item) => item.wavelengthNm !== selectedWavelength), { wavelengthNm: selectedWavelength, xRatio }].sort((a, b) => a.xRatio - b.xRatio);
-    setAMarkers(update);
-    setAComplete(false); setCalibResult(null);
-  };
-  const removeMarker = (wavelengthNm: number) => {
-    setAMarkers((items) => items.filter((item) => item.wavelengthNm !== wavelengthNm));
-    setAComplete(false); setCalibResult(null);
-  };
-
-  // 执行标定：用全部已知线最小二乘拟合 L 和 x₀，提高精度
-  const runCalibration = useCallback(() => {
-    if (!aImage) { toast.warning("请先上传光谱图"); return; }
-    if (aImage.overexposed) { toast.warning("谱图过曝，结果已阻止；请降低曝光后重新拍摄"); return; }
-    if (!aImage.sharpnessOk) { toast.warning("谱图清晰度不足，结果已阻止；请重新对焦"); return; }
-    if (usableReadings.length < 2) { toast.error("需要至少两条已标记谱线"); return; }
-    try {
-      const dNm = 3333.333;
-      const sorted = [...usableReadings].sort((a, b) => a.wavelengthNm - b.wavelengthNm);
-      // 模型：xᵢ = x₀ + u · tan(θᵢ)，其中 θᵢ = arcsin(λᵢ/d)，u = ±L
-      // 最小二乘解 [x₀, u]
-      const rows = sorted.map((line) => {
-        const theta = Math.asin(line.wavelengthNm / dNm);
-        return { t: Math.tan(theta), x: line.xPx, lam: line.wavelengthNm };
+      const next = await analyzeSpectrumOffline(file, {
+        dUm: Number(dUmText || "3.333"),
+        prominence,
+        minDistance,
+        manualPoints,
       });
-      // 正规方程：AᵀA·p = Aᵀb
-      let stt = 0, st = 0, sx = 0, stx = 0, n = 0;
-      for (const r of rows) { stt += r.t * r.t; st += r.t; sx += r.x; stx += r.t * r.x; n++; }
-      const det = n * stt - st * st;
-      if (Math.abs(det) < 1e-15) throw new Error("谱线角度过于接近，无法拟合");
-      const x0 = (stt * sx - st * stx) / det;
-      const u = (n * stx - st * sx) / det;
-      const L = Math.abs(u);
-      const reversed = u < 0;
-      // x₁ = 零级到最短波长线的距离
-      const thetaMin = Math.asin(sorted[0].wavelengthNm / dNm);
-      const x1 = L * Math.tan(thetaMin);
-      // 验证
-      let maxErr = 0;
-      for (const r of rows) {
-        const pred = Math.abs(dNm * (r.x - x0) / Math.sqrt((r.x - x0) ** 2 + L * L));
-        maxErr = Math.max(maxErr, Math.abs(pred - r.lam));
-      }
-      if (maxErr > 3) throw new Error(`标定验证失败：最大残差 ${maxErr.toFixed(1)} nm，超过 3 nm`);
-      const calib = {
-        dNm, dUm: dNm / 1000, Lpx: L, x0Px: x0, x1Px: x1, x2Px: x1 + Math.abs(sorted[1].xPx - sorted[0].xPx),
-        deltaPx: Math.abs(sorted[1].xPx - sorted[0].xPx), reversed, order: 1,
-        theta1Deg: thetaMin * 180 / Math.PI, theta2Deg: Math.asin(sorted[1].wavelengthNm / dNm) * 180 / Math.PI,
-      };
-      setCalibResult({ ...calib, line1: { wavelengthNm: sorted[0].wavelengthNm, xPx: sorted[0].xPx }, line2: { wavelengthNm: sorted[1].wavelengthNm, xPx: sorted[1].xPx } });
-      setAComplete(true);
-      toast.success(`标定完成：d = ${calib.dUm.toFixed(3)} μm，L = ${calib.Lpx.toFixed(0)} px，用 ${n} 条线拟合`);
-    } catch (error) { toast.error(error instanceof Error ? error.message : "标定失败"); }
-  }, [usableReadings, aImage]);
-
-  // 图像分析算法：交叉验证反演所有谱线波长
-  const crossValidation = useMemo(() => {
-    if (!aComplete || !aImage || usableReadings.length < 2) return null;
-    const sorted = [...usableReadings].sort((a, b) => a.wavelengthNm - b.wavelengthNm);
-    if (sorted.length === 2) {
-      // 只有两条线：直接展示标准值
-      return {
-        mode: "two" as const,
-        lines: sorted.map((line) => ({
-          wavelengthNm: line.wavelengthNm,
-          standardNm: line.wavelengthNm,
-          errorNm: 0,
-          xPx: line.xPx,
-          calibrated: true,
-        })),
-      };
+      setResult(next);
+      setStatus("complete");
+      setErrorMessage("");
+      toast.success("标定完成：已生成波长与残差结果");
+    } catch (error) {
+      const partial = error instanceof PartialAnalysisError ? error.partialResult : null;
+      if (partial) setResult(partial);
+      setStatus("error");
+      setErrorMessage(error instanceof Error ? error.message : "标定失败，请检查照片质量。");
     }
-    // 多于两条线：交叉验证——用其中两条标定，反演第三条
-    // 关键：选择波长间距最大的两条线做标定，让目标落在内插区间而非外推
-    const results: Array<{ wavelengthNm: number; standardNm: number; errorNm: number; xPx: number; calibrated: boolean; via: string }> = [];
-    for (let i = 0; i < sorted.length; i++) {
-      const target = sorted[i];
-      const others = sorted.filter((_, j) => j !== i);
-      if (others.length < 2) continue;
-      // 在剩余线中找波长间距最大的一对
-      let bestPair = [others[0], others[1]];
-      let bestSpacing = Math.abs(others[0].wavelengthNm - others[1].wavelengthNm);
-      for (let a = 0; a < others.length; a++) {
-        for (let b = a + 1; b < others.length; b++) {
-          const spacing = Math.abs(others[a].wavelengthNm - others[b].wavelengthNm);
-          if (spacing > bestSpacing) { bestSpacing = spacing; bestPair = [others[a], others[b]]; }
-        }
-      }
-      try {
-        const [c1, c2] = bestPair;
-        const calib = calibrateFromPixelDiff(c1.wavelengthNm, c1.xPx, c2.wavelengthNm, c2.xPx);
-        const shortLine = c1.wavelengthNm <= c2.wavelengthNm ? c1 : c2;
-        const longLine = c1.wavelengthNm <= c2.wavelengthNm ? c2 : c1;
-        const reversed = shortLine.xPx > longLine.xPx;
-        const zeroXPx = reversed ? shortLine.xPx + calib.x1Px : shortLine.xPx - calib.x1Px;
-        const x3Px = Math.abs(target.xPx - zeroXPx);
-        const predicted = Math.abs(calib.dNm * x3Px / Math.sqrt(x3Px * x3Px + calib.Lpx * calib.Lpx));
-        results.push({
-          wavelengthNm: predicted,
-          standardNm: target.wavelengthNm,
-          errorNm: predicted - target.wavelengthNm,
-          xPx: target.xPx,
-          calibrated: false,
-          via: `由 ${Math.min(c1.wavelengthNm, c2.wavelengthNm).toFixed(2)} + ${Math.max(c1.wavelengthNm, c2.wavelengthNm).toFixed(2)} nm 反演`,
-        });
-      } catch {
-        results.push({ wavelengthNm: NaN, standardNm: target.wavelengthNm, errorNm: NaN, xPx: target.xPx, calibrated: false, via: "标定失败" });
-      }
-    }
-    return { mode: "cross" as const, lines: results };
-  }, [aComplete, aImage, usableReadings]);
-
-  const aResult = useMemo(() => {
-    if (!aComplete || !aImage || !calibResult) return null;
-    return calibResult;
-  }, [aComplete, aImage, calibResult]);
-
-  const yellowDoubletResolved = aMarkers.some((item) => item.wavelengthNm === 576.96) && aMarkers.some((item) => item.wavelengthNm === 579.07) && (() => { const yellow = aMarkers.filter((item) => item.wavelengthNm >= 576); return yellow.length === 2 && Math.abs(yellow[1].xRatio - yellow[0].xRatio) * (aImage?.width ?? 0) >= 1.5; })();
-  const hasResult = Boolean(aResult && aImage?.sharpnessOk && !aImage.overexposed);
-  const blockReason = !aImage ? "请上传光谱图" : aImage.overexposed ? "谱图过曝，请降低曝光后重拍" : !aImage.sharpnessOk ? "谱线不够清晰，请重新对焦后拍摄" : !aMarkers.length ? "请先标记或确认至少两条参考谱线" : usableReadings.length < 2 ? "需要至少两条已标记谱线才能标定" : !aComplete ? "已具备标定数据，点击「执行标定」生成结果" : "";
-  const status = !aImage ? "待上传" : hasResult ? "已完成" : blockReason ? "被阻塞" : "可计算";
+  }, [dUmText, file, minDistance, manualPoints, prominence]);
 
   useEffect(() => {
     updateJourney({
-      capture: { imageCount: Number(Boolean(aImage)), exposureOk: Boolean(aImage && !aImage.overexposed), sharpnessOk: Boolean(aImage?.sharpnessOk), zeroX: null, zeroReferenceCaptured: false, zeroReadingDeg: null, peakCount: aImage?.peaks.length ?? 0 },
-      identification: { matchedLines: aMarkers.length, yellowDoubletResolved },
-      inversion: { reportable: hasResult, dUm: hasResult && aResult ? aResult.dUm : null, expandedUncertaintyUm: null, correlation: null, profileLowUm: null, profileHighUm: null, boundaryHit: false, blockReason: hasResult ? "" : blockReason },
+      capture: {
+        imageCount: Number(Boolean(file)),
+        exposureOk: Boolean(file && !result?.processing?.fallbackRequired),
+        sharpnessOk: Boolean(file),
+        zeroX: null,
+        zeroReferenceCaptured: false,
+        zeroReadingDeg: null,
+        peakCount: result?.detectedPeaks.length ?? 0,
+      },
+      identification: { matchedLines: lineResiduals.length, yellowDoubletResolved: lineResiduals.some((line) => line.standardNm === 576.96) && lineResiduals.some((line) => line.standardNm === 579.07) },
+      inversion: {
+        reportable: hasResult,
+        dUm: hasResult && result?.calibration ? result.calibration.dUm : null,
+        expandedUncertaintyUm: null,
+        correlation: null,
+        profileLowUm: null,
+        profileHighUm: null,
+        boundaryHit: false,
+        blockReason: hasResult ? "" : blockReason,
+      },
     });
-  }, [aImage, aMarkers.length, yellowDoubletResolved, hasResult, aResult, blockReason, updateJourney]);
+  }, [file, result, lineResiduals, hasResult, blockReason, updateJourney]);
 
   const recordSnapshot = useMemo<RecordSnapshot>(() => {
-    const resultValue = hasResult && aResult ? `${aResult.dUm.toFixed(3)} μm` : "进行中";
-    const needsReview = Boolean(aImage && !hasResult);
+    const resultValue = hasResult && result?.calibration ? `${result.calibration.dUm.toFixed(3)} μm` : "进行中";
     const steps: string[] = [];
     if (journey.prelab.capturedLines >= 2 && journey.prelab.dUm !== null) steps.push("虚拟预习");
-    if (aImage && !aImage.overexposed && aImage.sharpnessOk) steps.push("光谱图采集与质量检查");
-    if (aMarkers.length >= 2) steps.push("谱线自动匹配与确认");
-    if (calibResult) steps.push("两线自标定（求解虚拟零级与相机距离）");
-    if (crossValidation) steps.push("交叉验证反演所有谱线波长");
-    if (hasResult) steps.push("d 反演", "云端归档与实验复盘");
-    const payload = {
-      state: { detector, complete: aComplete, sample: Boolean(aSource?.sample) },
-      referenceMarkers: aMarkers,
-      result: aResult ? { ...aResult, crossValidation } : null,
-      processing: { peaks: aImage?.peaks.length ?? 0, overexposed: Boolean(aImage?.overexposed), sharpnessOk: Boolean(aImage?.sharpnessOk) },
-      evidence: { stages: ["虚拟预习", "光谱图采集与质量检查", "谱线自动匹配与确认", "两线自标定", "未知谱线测量与 d 反演", "云端归档与实验复盘"], limitation: "上传一张光谱图即可：系统自动检峰并匹配汞灯参考线，执行标定后由两已知线像素位置解出虚拟零级 x₁ 与相机距离 L；随后点击未知峰可直接测量波长。图像像素位置直接参与反演，无需游标读数。" },
-    };
+    if (file) steps.push("光谱图采集与质量检查");
+    if (lineResiduals.length >= 3) steps.push("谱线自动匹配与确认");
+    if (hasResult) steps.push("物理约束标定", "d 反演", "云端归档与实验复盘");
     return {
-      task: "A",
+      task,
       source: "汞灯",
       resultLabel: "光栅常数 d",
       resultValue,
-      quality: !hasResult ? (blockReason || "进行中") : needsReview ? "需复核" : "可报告",
-      status: !hasResult ? "draft" : needsReview ? "needs_review" : "completed",
+      quality: !hasResult ? (blockReason || "进行中") : "可报告",
+      status: !hasResult ? "draft" : "completed",
       steps,
       diagnosis,
-      payload,
+      payload: {
+        state: { prominence, minDistance, dUmText, complete: hasResult },
+        referenceMarkers: lineResiduals.map((line) => ({ wavelengthNm: line.standardNm, xRatio: line.x / Math.max(result?.summary.imageWidth || 1, 1) })),
+        result: result ? { ...result } : null,
+        processing: { peaks: result?.detectedPeaks.length ?? 0, overexposed: false, sharpnessOk: Boolean(file) },
+        evidence: {
+          stages: ["虚拟预习", "光谱图采集与质量检查", "谱线自动匹配与确认", "物理约束标定", "波长结果与残差复核", "云端归档与实验复盘"],
+          limitation: "浏览器端离线分析：HSV 颜色分析 → 多源融合峰值检测 → 物理约束标定。d 作为已知或软约束，不作为自由反演结论。",
+        },
+      },
     };
-  }, [aResult, aImage, usableReadings.length, hasResult, detector, aComplete, aSource?.sample, aMarkers, diagnosis, blockReason, journey.prelab, calibResult, crossValidation]);
+  }, [diagnosis, file, hasResult, journey.prelab, lineResiduals, dUmText, minDistance, prominence, result, blockReason]);
 
   const hydrateRecord = useCallback(async (record: SavedRecord) => {
     const state = record.payload.state && typeof record.payload.state === "object" ? record.payload.state as Record<string, unknown> : {};
-    const markers = Array.isArray(record.payload.referenceMarkers) ? record.payload.referenceMarkers.filter((item): item is ReferenceMarker => Boolean(item) && typeof item === "object" && typeof (item as ReferenceMarker).wavelengthNm === "number" && typeof (item as ReferenceMarker).xRatio === "number") : [];
-    const savedDetector = state.detector && typeof state.detector === "object" ? state.detector as Partial<DetectorOptions> : null;
-    if (savedDetector && typeof savedDetector.prominence === "number" && typeof savedDetector.minDistancePx === "number") setDetector({ prominence: savedDetector.prominence, minDistancePx: savedDetector.minDistancePx });
     if (record.task !== "A") return;
     setDiagnosis(record.diagnosis);
-    setAMarkers(markers);
-    setAComplete(Boolean(state.complete));
-    setCalibResult(null); setUnknownResult(null);
-    if (state.sample) setASource(buildSampleSource());
-    else setASource(record.imageUrls.primary ? await sourceFromSyncedImage(record.imageUrls.primary).catch(() => null) : null);
-  }, []);
+    if (typeof state.prominence === "number") setProminence(state.prominence);
+    if (typeof state.minDistance === "number") setMinDistance(state.minDistance);
+    if (typeof state.dUmText === "string") setDUmText(state.dUmText);
+    setResult(null);
+    setStatus(file ? "ready" : "idle");
+  }, [file]);
 
-  const sync = useExperimentSync({ task, enabled: Boolean(aImage), authenticated, snapshot: recordSnapshot, pendingImagesRef, onRemoteRecord: hydrateRecord });
-  const syncLabel = !authenticated ? "登录后可保存到云端" : sync.phase === "loading" ? "正在读取云端记录" : sync.phase === "pending" ? "有更改待同步" : sync.phase === "saving" ? "正在同步" : sync.phase === "retrying" ? "同步失败，正在重试" : sync.phase === "error" ? "同步失败" : sync.phase === "synced" && sync.lastSyncedAt ? `已同步 ${formatChinaClock(sync.lastSyncedAt)}` : "自动同步已就绪";
-  useEffect(() => {
-    if (hasResult && sync.phase === "synced" && sync.lastSyncedAt) updateJourney({ archive: { synced: true, recordId: null, syncedAt: sync.lastSyncedAt } });
-  }, [hasResult, sync.phase, sync.lastSyncedAt, updateJourney]);
+  const sync = useExperimentSync({ task, enabled: Boolean(file), authenticated, snapshot: recordSnapshot, pendingImagesRef, onRemoteRecord: hydrateRecord });
+  const syncLabel = !authenticated
+    ? "登录后可保存到云端"
+    : sync.phase === "loading" ? "正在读取云端记录"
+      : sync.phase === "pending" ? "有更改待同步"
+        : sync.phase === "saving" ? "正在同步"
+          : sync.phase === "retrying" ? "同步失败，正在重试"
+            : sync.phase === "error" ? "同步失败"
+              : sync.phase === "synced" && sync.lastSyncedAt ? `已同步 ${formatChinaClock(sync.lastSyncedAt)}`
+                : "自动同步已就绪";
 
-  const resetTask = () => {
-    sync.resetSync();
-    setDiagnosis("");
-    setDetector({ prominence: .018, minDistancePx: 3 }); setSelectedWavelength(546.07);
-    setASource(null); setAMarkers([]); setAComplete(false);
-    setCalibResult(null); setUnknownResult(null);
-  };
-  const summary: [string, string][] = [
-    ["匹配参考线", `${aMarkers.length} 条`],
-    ["自标定状态", calibResult ? `已完成 · L = ${calibResult.Lpx.toFixed(0)} px` : "待执行标定"],
-    ["光栅常数 d", hasResult && aResult ? `${aResult.dUm.toFixed(3)} μm` : "未形成结果"],
-  ];
-  if (crossValidation) summary.push(["反演谱线", `${crossValidation.lines.length} 条`]);
+  const statusForCard: DemoStatus = !file
+    ? "idle"
+    : status === "loading" ? "loading"
+      : status === "error" ? "error"
+        : status === "complete" ? "complete"
+          : "ready";
 
-  return <div className="module-page analysis-page">
-    <PageHeading eyebrow="实验 · 图像分析工作台" title="从单张光谱图到可复核的测量结果。" description="上传一张光谱照片，系统自动检峰并匹配汞灯参考线；执行标定后由两条已知线的像素位置解出虚拟零级 x₁ 与相机距离 L，进而反演光栅常数 d。标定完成后可点击未知峰直接测量其波长，无需游标读数。" />
-    <div className="analysis-workbench">
-      <aside className="panel parameter-panel"><div className="analysis-card-heading"><span><SlidersHorizontal size={18} /></span><div><h2>测量参数</h2><p>调节峰值检测灵敏度；图像像素位置直接参与标定与反演。</p></div></div><div className="parameter-form">
-        <label>峰值突出度 <output>{detector.prominence.toFixed(3)}</output><input type="range" min=".005" max=".2" step=".005" value={detector.prominence} onChange={(event) => setDetector((value) => ({ ...value, prominence: Number(event.target.value) }))} /></label>
-        <label>最小峰间距（px）<input type="number" min="2" max="64" value={detector.minDistancePx} onChange={(event) => setDetector((value) => ({ ...value, minDistancePx: Math.min(64, Math.max(2, Number(event.target.value))) }))} /></label>
-        <div className="parameter-buttons"><button className="reset-button parameter-reset" onClick={resetTask}><RotateCcw size={15} />恢复默认</button><button className="reset-button parameter-reset sample-button" onClick={loadSample}><Play size={15} />加载示例</button></div>
-      </div></aside>
-      <section className="panel calibration-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>未知光栅常数反演</h2><p>上传光谱图后点击「执行标定」，用两条已知线反演其余谱线波长。</p></div><em className={`analysis-status ${status === "已完成" ? "done" : ""}`}>{status}</em></div>
-        <SpectrumStage image={aImage} markers={aComplete ? aMarkers : []} onMark={addMarker} caption={aImage?.sample ? "示例图像 · 汞灯光谱" : "光谱图 · 已完成强度提取"} onUpload={() => spectrumFileRef.current?.click()} />
-        <input ref={spectrumFileRef} type="file" accept="image/*" hidden onChange={(event) => uploadSpectrum(event.target.files ?? undefined)} />
-        {!aComplete && <MarkerPicker selected={selectedWavelength} setSelected={setSelectedWavelength} markers={aMarkers} onClear={() => { setAMarkers([]); setAComplete(false); setCalibResult(null); }} onRemove={removeMarker} image={aImage} onCandidate={addMarker} />}
-        <div className="analysis-actions"><label className="upload-button"><Upload size={17} />上传光谱图<input type="file" accept="image/*" hidden onChange={(event) => uploadSpectrum(event.target.files ?? undefined)} /></label><label className="camera-button"><Camera size={17} />手机拍摄<input type="file" accept="image/*" capture="environment" hidden onChange={(event) => uploadSpectrum(event.target.files ?? undefined)} /></label><button className="analyze-button" disabled={busy} onClick={runCalibration}><Play size={17} />{busy ? "处理中…" : "执行标定"}</button></div>
-        {aImage && <div className="quality-row"><span><i />候选峰 {aImage.peaks.length} 条</span><span><i className={aImage.overexposed ? "warn" : ""} />{aImage.overexposed ? "高光偏多" : "曝光正常"}</span><span><i className={!aImage.sharpnessOk ? "warn" : ""} />{aImage.sharpnessOk ? "清晰度通过" : "清晰度不足"}</span><span><i className={calibResult ? "" : "warn"} />{calibResult ? "已标定" : "待标定"}</span></div>}
-        {blockReason && aImage && <p className="inline-warning"><CircleAlert size={15} />{blockReason}</p>}
-        {crossValidation && <div className="wavelength-results"><div><strong>谱线波长反演结果</strong><p>{crossValidation.mode === "two" ? "两条谱线用于标定，展示标准值。" : `共 ${crossValidation.lines.length} 条谱线，每条由其余两条交叉反演。`}</p></div><div className="wavelength-table"><div><b>谱线</b><b>像素位置</b><b>{crossValidation.mode === "two" ? "标准波长" : "反演波长"}</b><b>标准值</b><b>误差</b>{crossValidation.mode === "cross" && <b>反演依据</b>}</div>{crossValidation.lines.map((line, index) => <div key={index}><span><i style={{ background: lineColor(line.standardNm) }} />{line.standardNm.toFixed(2)} nm</span><span>{line.xPx.toFixed(1)} px</span><strong className={Math.abs(line.errorNm) > 5 ? "error" : ""}>{Number.isFinite(line.wavelengthNm) ? `${line.wavelengthNm.toFixed(2)} nm` : "—"}</strong><span>{line.standardNm.toFixed(2)} nm</span><strong className={Math.abs(line.errorNm) > 5 ? "error" : ""}>{Number.isFinite(line.errorNm) ? `${line.errorNm >= 0 ? "+" : ""}${line.errorNm.toFixed(2)} nm` : "—"}</strong>{crossValidation.mode === "cross" && <span className="via">{(line as { via?: string }).via ?? ""}</span>}</div>)}</div></div>}
+  return (
+    <div className="module-page analysis-page analysis-demo">
+      <PageHeading
+        eyebrow="课中 · 图像分析"
+        title="从光谱照片到波长结果"
+        description="上传一级光谱照片，完成 HSV 颜色分析、多源融合峰值检测与物理约束标定；d 作为已知或软约束，不作为自由反演结论。"
+      />
+      <section className="lab-section" id="demo">
+        <div className="lab-layout">
+          <div className="lab-left-column">
+            <div className="control-card">
+              <div className="card-title">
+                <Sigma size={20} />
+                <div>
+                  <h3>标定参数</h3>
+                  <span>调整突出度与峰间距，必要时手动标定谱线。</span>
+                </div>
+              </div>
+              <label className="field">
+                <span>光栅常数 d (μm)</span>
+                <input value={dUmText} onChange={(event) => setDUmText(event.target.value)} inputMode="decimal" />
+              </label>
+              <label className="field">
+                <span>峰值突出度 {prominence.toFixed(3)}</span>
+                <input type="range" min="0.01" max="0.12" step="0.005" value={prominence} onChange={(event) => setProminence(Number(event.target.value))} />
+              </label>
+              <label className="field">
+                <span>最小峰间距 (px)</span>
+                <input type="number" min="4" max="80" value={minDistance} onChange={(event) => setMinDistance(Number(event.target.value))} />
+              </label>
+              <button className="ghost-button" type="button" onClick={resetDemo}><RotateCcw size={17} /> 重置演示</button>
+            </div>
+          </div>
+
+          <ExperimentCard
+            title="汞灯标定"
+            subtitle="上传一级光谱照片，拟合有效参数 x₀ / L。"
+            preview={preview}
+            result={result}
+            status={statusForCard}
+            error={errorMessage}
+            inputRef={inputRef}
+            onFile={handleFile}
+            onRun={() => void runCalibration()}
+            runLabel="执行标定"
+            mode="calibration"
+            selectedLineKey={selectedLineKey}
+            onSelectedLineKey={setSelectedLineKey}
+            manualPoints={manualPoints}
+            onAddManualPoint={addManualPoint}
+            onRemoveManualPoint={removeManualPoint}
+            onClearManualPoints={() => setManualPoints([])}
+            detectedPeaks={result?.detectedPeaks ?? []}
+          />
+
+          <ResultsGrid result={result} lineResiduals={lineResiduals} />
+        </div>
+      </section>
+
+      <section className="panel overview-panel">
+        <div>
+          <h2>结果总览</h2>
+          <p>
+            {!authenticated
+              ? "匿名状态可完成本地分析；登录后自动保存实验过程。"
+              : hasResult
+                ? "关键参数、最终结果与标定信息会自动同步。"
+                : "上传光谱图后即开始保存实验过程，完成标定后自动更新结果。"}
+          </p>
+          <span className={`sync-state ${sync.phase}`} aria-live="polite">
+            {sync.phase === "error" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}
+            {syncLabel}
+          </span>
+          {sync.phase === "error" && sync.errorMessage && <small className="sync-error">{sync.errorMessage}</small>}
+        </div>
+        <div className="overview-metrics">
+          <span><small>匹配参考线</small><strong>{lineResiduals.length} 条</strong></span>
+          <span><small>自标定状态</small><strong>{hasResult && result?.calibration ? `已完成 · L = ${result.calibration.effectiveLPx.toFixed(0)} px` : "待执行标定"}</strong></span>
+          <span><small>光栅常数 d</small><strong>{hasResult && result?.calibration ? `${result.calibration.dUm.toFixed(3)} μm` : "未形成结果"}</strong></span>
+        </div>
+        {hasResult && (!authenticated || sync.currentSnapshotSynced)
+          ? <button className="primary-action" onClick={finishExperiment}><CheckCircle2 size={16} />完成本次实验</button>
+          : (
+            <button
+              className="secondary-action"
+              onClick={() => (sync.phase === "error" && !file ? sync.retryLoad() : void sync.syncNow())}
+              disabled={!authenticated || sync.phase === "saving" || sync.phase === "retrying" || (!file && sync.phase !== "error")}
+            >
+              <Save size={16} />
+              {sync.phase === "error" && !file ? "重新读取" : sync.phase === "error" ? "立即重试" : "立即同步"}
+            </button>
+          )}
+      </section>
+
+      <section className="panel review-note-panel">
+        <div className="analysis-card-heading">
+          <span><ClipboardCheck size={18} /></span>
+          <div>
+            <h2>异常诊断与复核意见</h2>
+            <p>记录异常现象、可能原因和复核结论；输入内容会随实验记录自动同步。</p>
+          </div>
+        </div>
+        <textarea
+          value={diagnosis}
+          maxLength={2000}
+          onChange={(event) => setDiagnosis(event.target.value)}
+          placeholder="例如：黄色双线未完全分离，已重新调整狭缝并复测。"
+        />
       </section>
     </div>
-    <section className="panel overview-panel"><div><h2>结果总览</h2><p>{!authenticated ? "匿名状态可完成本地分析；登录后自动保存实验过程。" : hasResult ? "关键参数、最终结果与标定信息会自动同步。" : "上传光谱图后即开始保存实验过程，完成标定后自动更新结果。"}</p><span className={`sync-state ${sync.phase}`} aria-live="polite">{sync.phase === "error" ? <CircleAlert size={14} /> : <CheckCircle2 size={14} />}{syncLabel}</span>{sync.phase === "error" && sync.errorMessage && <small className="sync-error">{sync.errorMessage}</small>}</div><div className="overview-metrics">{summary.map(([label, value]) => <span key={label}><small>{label}</small><strong>{value}</strong></span>)}</div>{hasResult && (!authenticated || sync.currentSnapshotSynced) ? <button className="primary-action" onClick={finishExperiment}><CheckCircle2 size={16} />完成本次实验</button> : <button className="secondary-action" onClick={() => sync.phase === "error" && !aImage ? sync.retryLoad() : void sync.syncNow()} disabled={!authenticated || sync.phase === "saving" || sync.phase === "retrying" || (!aImage && sync.phase !== "error")}><Save size={16} />{sync.phase === "error" && !aImage ? "重新读取" : sync.phase === "error" ? "立即重试" : "立即同步"}</button>}</section>
-    <section className="panel review-note-panel"><div className="analysis-card-heading"><span><ClipboardCheck size={18} /></span><div><h2>异常诊断与复核意见</h2><p>记录异常现象、可能原因和复核结论；输入内容会随实验记录自动同步。</p></div></div><textarea value={diagnosis} maxLength={2000} onChange={(event) => setDiagnosis(event.target.value)} placeholder="例如：黄色双线未完全分离，已重新调整狭缝并复测。" /></section>
-    <div className="analysis-results-grid">
-      <section className="panel intensity-panel"><div className="analysis-card-heading wide"><span><Waves size={18} /></span><div><h2>强度剖面与谱线标注</h2><p>曲线、候选峰和人工参考标记来自当前图像数据。</p></div></div><IntensityChart image={aImage} markers={aMarkers} title="光谱横向强度剖面" /></section>
-      <div className="analysis-result-stack"><section className="panel final-result-card"><div className="analysis-card-heading"><span><BarChart3 size={18} /></span><div><h2>最终光栅结果</h2><p>由两已知线像素位置自标定得出；标定完成后可测量未知峰波长。</p></div></div>{hasResult && aResult ? <div className="final-measure"><small>光栅常数 d · 两线自标定</small><strong>{aResult.dUm.toFixed(3)} <em>μm</em></strong><p>相机距离 L = {aResult.Lpx.toFixed(0)} px · 虚拟零级 x₁ = {aResult.x1Px.toFixed(1)} px</p><p>标定线：{aResult.line1.wavelengthNm.toFixed(2)} nm @ {aResult.line1.xPx.toFixed(1)} px · {aResult.line2.wavelengthNm.toFixed(2)} nm @ {aResult.line2.xPx.toFixed(1)} px</p></div> : <div className="result-placeholder"><FlaskConical size={28} /><span>{!aImage ? "等待上传光谱图" : usableReadings.length < 2 ? "需要至少两条已匹配谱线才能标定" : "等待执行标定"}</span></div>}</section>
-        <section className="panel residual-card"><div className="analysis-card-heading"><span><Target size={18} /></span><div><h2>标定几何复核</h2><p>两条已知线的像素位置与衍射角。</p></div></div>{calibResult ? <div className="residual-table"><div><b>标准 λ</b><b>像素 x</b><b>衍射角 θ</b></div><div key={calibResult.line1.wavelengthNm}><span>{calibResult.line1.wavelengthNm.toFixed(2)} nm</span><span>{calibResult.line1.xPx.toFixed(1)} px</span><strong>{calibResult.theta1Deg.toFixed(3)}°</strong></div><div key={calibResult.line2.wavelengthNm}><span>{calibResult.line2.wavelengthNm.toFixed(2)} nm</span><span>{calibResult.line2.xPx.toFixed(1)} px</span><strong>{calibResult.theta2Deg.toFixed(3)}°</strong></div><div><span>Δx</span><span>{calibResult.deltaPx.toFixed(1)} px</span><strong>L = {calibResult.Lpx.toFixed(0)} px</strong></div></div> : <div className="result-placeholder compact"><Target size={25} /><span>完成标定后显示两条已知线的几何信息</span></div>}</section></div>
-    </div>
-    <section className="panel process-panel"><div className="analysis-card-heading wide"><span><SlidersHorizontal size={18} /></span><div><h2>图像处理全过程</h2><p>图像用于谱线识别与像素定位，物理反演直接使用像素坐标。</p></div></div><ProcessingTimeline image={aImage} selectedCount={usableReadings.length} resultText={aResult ? `d = ${aResult.dUm.toFixed(3)} μm · L = ${aResult.Lpx.toFixed(0)} px` : "等待执行标定"} /></section>
-  </div>;
+  );
 }
 
 function RecordsModule({ authenticated, authHref }: { authenticated: boolean; authHref: string | null }) {
