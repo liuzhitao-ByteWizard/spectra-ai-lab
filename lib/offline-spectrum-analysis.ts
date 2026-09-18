@@ -355,7 +355,7 @@ function peakToStandard(x: number, height: number, family: DetectedPeak["family"
   return { x: Number(x), height: Number(height), family, color: familyColor(family), hue: 0, saturation: 1, value: 1, colorName: familyColorName(family) };
 }
 
-function wavelengthFromX(xPx: number, dUm: number, x0Px: number, effectiveLPx: number) {
+export function wavelengthFromX(xPx: number, dUm: number, x0Px: number, effectiveLPx: number) {
   const delta = xPx - x0Px;
   return dUm * 1e3 * Math.abs(delta) / Math.sqrt(delta * delta + effectiveLPx * effectiveLPx);
 }
@@ -386,7 +386,7 @@ function initialFit(xs: number[], ys: number[], dUm: number, reversed: boolean, 
   };
 }
 
-function fitCalibration(standards: { peak: { x: number }; standard: { wavelength: number } }[], dUm: number, width: number) {
+export function fitCalibration(standards: { peak: { x: number }; standard: { wavelength: number } }[], dUm: number, width: number) {
   const xs = standards.map((row) => row.peak.x);
   const ys = standards.map((row) => row.standard.wavelength);
   const reversed = (xs[xs.length - 1] - xs[0]) * (ys[ys.length - 1] - ys[0]) >= 0;
@@ -429,7 +429,7 @@ function fitCalibration(standards: { peak: { x: number }; standard: { wavelength
     }
     if (stepX < 0.01 && stepL < 0.01) break;
   }
-  return { x0Px: x0, effectiveLPx: Math.abs(L) };
+  return { x0Px: x0, effectiveLPx: Math.abs(L), rmseNm: cost, reversed };
 }
 
 function expectedFamily(key: string) {
