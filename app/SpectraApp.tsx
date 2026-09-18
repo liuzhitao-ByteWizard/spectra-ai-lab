@@ -462,19 +462,36 @@ function AssistantModule({ journey, navigate }: { journey: ExperimentJourney; na
 
   const canEmbedClassroom = Boolean(OPENMAIC_URL) && (!isLoopbackClassroomUrl(OPENMAIC_URL!) || isLocalBrowser);
   if (!canEmbedClassroom) return <div className="openmaic-fullscreen classroom-launch">
-    <section className="classroom-launch-card" aria-labelledby="classroom-launch-title">
-      <span className="classroom-launch-kicker"><Users size={18} /> OpenMAIC 互动课堂</span>
-      <h1 id="classroom-launch-title">在新窗口开启互动课堂</h1>
-      <p>线上课堂服务不能嵌入当前页面。点击下方按钮即可进入可用的互动课堂；首次使用请按页面提示登录或输入访问码。</p>
-      <a className="classroom-primary-link" href={HOSTED_OPENMAIC_URL} target="_blank" rel="noreferrer">
-        进入互动课堂 <ExternalLink size={18} />
-      </a>
-      <p className="classroom-launch-note">如已部署自己的 OpenMAIC 服务，可通过 <code>NEXT_PUBLIC_OPENMAIC_URL</code> 配置其公开 HTTPS 地址并在这里直接嵌入。</p>
-    </section>
-    <button className="openmaic-back-btn" onClick={() => navigate("home")} aria-label="返回主站">
-      <ArrowLeft size={18} />
-      <span>返回主站</span>
-    </button>
+    <header className="classroom-launch-header">
+      <button className="classroom-back-link" onClick={() => navigate("home")} aria-label="返回主站">
+        <ArrowLeft size={18} />
+        <span>SPECTRA 实验室</span>
+      </button>
+      <span className="classroom-status"><i />在线课堂</span>
+    </header>
+    <main className="classroom-launch-stage" aria-labelledby="classroom-launch-title">
+      <section className="classroom-launch-copy">
+        <p className="classroom-launch-eyebrow"><Users size={17} /> AI 互动课堂</p>
+        <h1 id="classroom-launch-title">把实验问题，<br /><em>讲成一堂课。</em></h1>
+        <p className="classroom-launch-intro">从光栅衍射、谱线识别到波长计算，让 AI 教师陪你推导、提问和复盘。</p>
+        <div className="classroom-launch-actions">
+          <a className="classroom-primary-link" href={HOSTED_OPENMAIC_URL} target="_blank" rel="noreferrer">
+            开始一堂互动课 <ExternalLink size={18} />
+          </a>
+          <span>将在新窗口打开</span>
+        </div>
+      </section>
+      <aside className="classroom-course-preview" aria-label="互动课堂内容预览">
+        <div className="classroom-preview-topline"><span>01 / 光栅衍射</span><Aperture size={20} /></div>
+        <div className="classroom-spectrum" aria-hidden="true"><i /><i /><i /><i /><i /></div>
+        <div className="classroom-preview-body">
+          <span className="classroom-preview-label">今天的问题</span>
+          <p>为什么改变光栅角度，亮纹的位置会发生变化？</p>
+          <div className="classroom-preview-row"><span>AI 教师引导</span><strong>开始探索 <ArrowRight size={15} /></strong></div>
+        </div>
+      </aside>
+    </main>
+    <p className="classroom-launch-footnote">首次使用时，按课堂页面提示登录或输入访问码。</p>
   </div>;
 
   return <div className="openmaic-fullscreen">

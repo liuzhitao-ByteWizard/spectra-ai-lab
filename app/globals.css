@@ -690,28 +690,70 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 .openmaic-fullscreen { position: fixed; inset: 0; z-index: 40; background: #fff; }
 .openmaic-iframe-full { display: block; width: 100%; height: 100%; border: 0; }
 .classroom-launch {
-  display: grid; place-items: center; padding: 28px;
+  min-height: 100dvh; padding: 28px clamp(24px, 5vw, 84px) 28px;
+  color: #eff8ff;
   background:
-    radial-gradient(circle at 78% 16%, rgba(34, 211, 238, .22), transparent 25rem),
-    radial-gradient(circle at 20% 84%, rgba(91, 89, 255, .2), transparent 28rem),
-    #07172c;
+    radial-gradient(ellipse 42rem 30rem at 92% 15%, rgba(38, 172, 230, .28), transparent 68%),
+    radial-gradient(ellipse 36rem 30rem at 12% 96%, rgba(38, 97, 173, .2), transparent 70%),
+    linear-gradient(118deg, #061329 0%, #0a1f3d 48%, #082743 100%);
 }
-.classroom-launch-card {
-  width: min(100%, 620px); padding: clamp(30px, 6vw, 58px);
-  color: #eaf4ff; border: 1px solid rgba(160, 213, 255, .24); border-radius: 24px;
-  background: rgba(10, 32, 59, .86); box-shadow: 0 24px 70px rgba(0, 0, 0, .28);
+.classroom-launch-header {
+  display: flex; align-items: center; justify-content: space-between; max-width: 1280px; margin: 0 auto;
 }
-.classroom-launch-kicker { display: inline-flex; align-items: center; gap: 8px; color: #79e8ff; font-size: .92rem; font-weight: 700; }
-.classroom-launch-card h1 { margin: 18px 0 14px; color: #fff; font-size: clamp(1.9rem, 5vw, 3rem); line-height: 1.15; }
-.classroom-launch-card > p { margin: 0; color: #c4d8ea; font-size: 1rem; line-height: 1.75; }
+.classroom-back-link {
+  display: inline-flex; align-items: center; gap: 9px; padding: 8px 0;
+  border: 0; color: #dcecff; background: transparent; font: inherit; font-size: .9rem; font-weight: 650; cursor: pointer;
+}
+.classroom-back-link:hover { color: #70e4ff; }
+.classroom-status { display: inline-flex; align-items: center; gap: 8px; color: #b9d5e9; font-size: .78rem; letter-spacing: .08em; }
+.classroom-status i { width: 7px; height: 7px; border-radius: 50%; background: #58e2a0; box-shadow: 0 0 0 4px rgba(88, 226, 160, .12); }
+.classroom-launch-stage {
+  display: grid; grid-template-columns: minmax(0, .94fr) minmax(320px, .72fr); align-items: center; gap: clamp(44px, 8vw, 130px);
+  width: min(100%, 1110px); min-height: calc(100dvh - 145px); margin: -18px auto 0;
+}
+.classroom-launch-copy { max-width: 610px; }
+.classroom-launch-eyebrow {
+  display: inline-flex; align-items: center; gap: 9px; margin: 0 0 22px;
+  color: #72e4ff; font-size: .86rem; font-weight: 750; letter-spacing: .09em; text-transform: uppercase;
+}
+.classroom-launch-copy h1 {
+  margin: 0; color: #fff; font-size: clamp(3rem, 6.8vw, 5.6rem); font-weight: 740; letter-spacing: -.075em; line-height: .98;
+}
+.classroom-launch-copy h1 em { color: #68dff6; font-style: normal; }
+.classroom-launch-intro { max-width: 510px; margin: 29px 0 0; color: #bfd3e4; font-size: clamp(1rem, 1.4vw, 1.12rem); line-height: 1.8; }
+.classroom-launch-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 36px; }
 .classroom-primary-link {
-  display: inline-flex; align-items: center; justify-content: center; gap: 9px; margin-top: 28px; padding: 13px 20px;
-  color: #04213a; border-radius: 11px; background: #6ee7f5; font-weight: 750; text-decoration: none;
-  transition: transform .2s, background .2s;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 15px 22px;
+  color: #062039; border-radius: 999px; background: #71e5f8; box-shadow: 0 10px 32px rgba(64, 207, 239, .22); font-weight: 780; text-decoration: none;
+  transition: transform .2s, background .2s, box-shadow .2s;
 }
-.classroom-primary-link:hover { transform: translateY(-2px); background: #b1f5ff; }
-.classroom-launch-note { margin-top: 28px !important; font-size: .85rem !important; }
-.classroom-launch-note code { padding: 2px 5px; color: #d9f6ff; border-radius: 4px; background: rgba(126, 227, 255, .12); }
+.classroom-primary-link:hover { transform: translateY(-2px); background: #b8f5ff; box-shadow: 0 14px 38px rgba(64, 207, 239, .32); }
+.classroom-launch-actions > span { color: #87a9c1; font-size: .82rem; }
+.classroom-course-preview {
+  position: relative; width: min(100%, 418px); justify-self: end; overflow: hidden;
+  border: 1px solid rgba(163, 221, 255, .25); border-radius: 22px;
+  background: linear-gradient(152deg, rgba(28, 68, 109, .75), rgba(8, 32, 63, .94));
+  box-shadow: 0 30px 80px rgba(0, 5, 25, .35);
+}
+.classroom-course-preview::before { content: ""; position: absolute; width: 240px; height: 240px; top: -135px; right: -110px; border-radius: 50%; background: rgba(76, 222, 245, .14); filter: blur(8px); }
+.classroom-preview-topline { position: relative; display: flex; align-items: center; justify-content: space-between; padding: 22px 24px 18px; color: #b7d7eb; font-size: .8rem; letter-spacing: .08em; }
+.classroom-preview-topline svg { color: #71e3f8; }
+.classroom-spectrum { position: relative; display: flex; align-items: end; gap: 12%; height: 130px; padding: 0 15% 16px; border-top: 1px solid rgba(178, 224, 255, .08); border-bottom: 1px solid rgba(178, 224, 255, .1); background: linear-gradient(90deg, rgba(13, 45, 83, .28), rgba(38, 111, 148, .32)); }
+.classroom-spectrum i { display: block; width: 3px; border-radius: 99px; background: #bff9ff; box-shadow: 0 0 12px currentColor; }
+.classroom-spectrum i:nth-child(1) { height: 45%; color: #8f8aff; background: #8f8aff; }.classroom-spectrum i:nth-child(2) { height: 74%; color: #77e6ff; background: #77e6ff; }.classroom-spectrum i:nth-child(3) { height: 94%; color: #b8f5d2; background: #b8f5d2; }.classroom-spectrum i:nth-child(4) { height: 57%; color: #fff1a2; background: #fff1a2; }.classroom-spectrum i:nth-child(5) { height: 82%; color: #f69aea; background: #f69aea; }
+.classroom-preview-body { padding: 25px 24px 23px; }
+.classroom-preview-label { color: #70e4f8; font-size: .76rem; font-weight: 750; letter-spacing: .08em; }
+.classroom-preview-body > p { margin: 10px 0 24px; color: #eff8ff; font-size: 1.1rem; font-weight: 640; line-height: 1.55; }
+.classroom-preview-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 15px; border-top: 1px solid rgba(183, 224, 247, .15); color: #9ab9cd; font-size: .8rem; }
+.classroom-preview-row strong { display: inline-flex; align-items: center; gap: 4px; color: #e9fbff; font-size: .8rem; }
+.classroom-launch-footnote { position: fixed; right: clamp(24px, 5vw, 84px); bottom: 23px; margin: 0; color: #799ab2; font-size: .76rem; }
+@media (max-width: 760px) {
+  .classroom-launch { padding: 23px 23px 44px; overflow-y: auto; }
+  .classroom-launch-stage { grid-template-columns: 1fr; gap: 46px; min-height: auto; margin: 58px auto 24px; }
+  .classroom-launch-copy h1 { font-size: clamp(3.1rem, 15vw, 4.65rem); }
+  .classroom-course-preview { width: 100%; justify-self: stretch; }
+  .classroom-launch-footnote { position: static; margin-top: 16px; }
+}
 .openmaic-open-external {
   position: fixed; top: 18px; right: 18px; z-index: 50; display: inline-flex; align-items: center; gap: 5px;
   padding: 8px 11px; color: #d6efff; border: 1px solid rgba(255,255,255,.19); border-radius: 9px;
