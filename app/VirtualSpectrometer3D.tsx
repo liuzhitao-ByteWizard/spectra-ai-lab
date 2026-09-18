@@ -337,7 +337,8 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
 
   useEffect(() => {
     if (directedObservationOrder !== null && observationOrder !== directedObservationOrder) {
-      setObservationOrder(directedObservationOrder);
+      const timer = window.setTimeout(() => setObservationOrder(directedObservationOrder), 0);
+      return () => window.clearTimeout(timer);
     }
   }, [directedObservationOrder, observationOrder]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import {
   Aperture, ArrowLeft, ArrowRight, BarChart3, BookOpen, Bot, Camera,
@@ -477,13 +477,15 @@ const isLoopbackClassroomUrl = (url: string) => {
     return false;
   }
 };
+const subscribeToBrowserLocation = () => () => {};
+const getIsLocalBrowser = () => {
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+};
+const getServerIsLocalBrowser = () => false;
 
 function AssistantModule({ journey, navigate }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void }) {
-  const [isLocalBrowser, setIsLocalBrowser] = useState(false);
-  useEffect(() => {
-    const host = window.location.hostname;
-    setIsLocalBrowser(host === "localhost" || host === "127.0.0.1" || host === "::1");
-  }, []);
+  const isLocalBrowser = useSyncExternalStore(subscribeToBrowserLocation, getIsLocalBrowser, getServerIsLocalBrowser);
 
   const canEmbedClassroom = Boolean(OPENMAIC_URL) && (!isLoopbackClassroomUrl(OPENMAIC_URL!) || isLocalBrowser);
   if (!canEmbedClassroom) return <div className="openmaic-fullscreen classroom-launch">
@@ -1633,11 +1635,15 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
   useEffect(() => {
     const fresh = structuredClone(emptyJourney);
     journeySavedSignatureRef.current = JSON.stringify({ ...fresh, updatedAt: 0 });
-    setJourney(fresh);
-    if (!authenticated) { journeyLoadedRef.current = true; return; }
+    const resetTimer = window.setTimeout(() => setJourney(fresh), 0);
+    if (!authenticated) {
+      journeyLoadedRef.current = true;
+      return () => window.clearTimeout(resetTimer);
+    }
     fetch("/api/journey", { method: "DELETE" })
       .catch(() => undefined)
       .finally(() => { journeyLoadedRef.current = true; });
+    return () => window.clearTimeout(resetTimer);
   }, [authenticated]);
   useEffect(() => {
     if (!authenticated) return;
