@@ -135,7 +135,9 @@ const quantizeArcminute = (value: number) => Math.round(value * 60) / 60;
 // These shared coordinates connect the physical model, ray tracing and eyepiece.
 // φ = 0° points along the collimator-to-grating axis; positive φ follows the
 // right-hand +1 order in the scene and on the main vernier.
-const OPTICAL_AXIS_Y = 1.47;
+// Keep both tube mouths and the independent grating carrier on one mechanical
+// optical axis. The carrier center is at y=1.52 in the scene model.
+const OPTICAL_AXIS_Y = 1.52;
 const OPTICAL_AXIS_Z = .03;
 const COLLIMATOR_MOUTH_X = -1.42;
 const TELESCOPE_MOUTH_X = 1.42;
