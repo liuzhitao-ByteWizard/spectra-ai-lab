@@ -510,28 +510,41 @@ const getServerIsLocalBrowser = () => false;
 
 function AssistantModule({ journey, navigate }: { journey: ExperimentJourney; navigate: (id: ModuleId) => void }) {
   const isLocalBrowser = useSyncExternalStore(subscribeToBrowserLocation, getIsLocalBrowser, getServerIsLocalBrowser);
-
+  const [classroomOpen, setClassroomOpen] = useState(true);
+  const [classroomReady, setClassroomReady] = useState(false);
+  const [classroomKey, setClassroomKey] = useState(0);
   const canEmbedClassroom = Boolean(OPENMAIC_URL) && (!isLoopbackClassroomUrl(OPENMAIC_URL!) || isLocalBrowser);
-  if (!canEmbedClassroom) return <div className="openmaic-fullscreen classroom-launch">
-    <header className="classroom-launch-header">
-      <button className="classroom-back-link" onClick={() => navigate("home")} aria-label="返回主站">
-        <ArrowLeft size={18} />
-        <span>SPECTRA 实验室</span>
-      </button>
-      <span className="classroom-status"><i />在线课堂</span>
-    </header>
-    <main className="classroom-launch-stage" aria-labelledby="classroom-launch-title">
-      <section className="classroom-launch-copy">
+
+  useEffect(() => {
+    if (!classroomOpen) return;
+    const timer = window.setTimeout(() => setClassroomReady(true), 1800);
+    return () => window.clearTimeout(timer);
+  }, [classroomKey, classroomOpen]);
+
+  const reloadClassroom = () => {
+    setClassroomReady(false);
+    setClassroomKey((value) => value + 1);
+  };
+
+  if (!canEmbedClassroom || !classroomOpen) {
+    return <section className="classroom-module" aria-labelledby="classroom-launch-title">
+      <div className="classroom-module-copy">
         <p className="classroom-launch-eyebrow"><Users size={17} /> AI 互动课堂</p>
         <h1 id="classroom-launch-title">把实验问题，<br /><em>讲成一堂课。</em></h1>
         <p className="classroom-launch-intro">从光栅衍射、谱线识别到波长计算，让 AI 教师陪你推导、提问和复盘。</p>
         <div className="classroom-launch-actions">
-          <a className="classroom-primary-link" href={HOSTED_OPENMAIC_URL} target="_blank" rel="noreferrer">
-            开始一堂互动课 <ExternalLink size={18} />
-          </a>
-          <span>将在新窗口打开</span>
+          {canEmbedClassroom ? (
+            <button className="classroom-primary-link" onClick={() => { setClassroomOpen(true); reloadClassroom(); }}>
+              进入互动课堂 <ArrowRight size={18} />
+            </button>
+          ) : (
+            <a className="classroom-primary-link" href={HOSTED_OPENMAIC_URL} target="_blank" rel="noreferrer">
+              开始一堂互动课 <ExternalLink size={18} />
+            </a>
+          )}
+          <span>{canEmbedClassroom ? "进入课堂后按提示输入访问码" : "将在新窗口打开"}</span>
         </div>
-      </section>
+      </div>
       <aside className="classroom-course-preview" aria-label="互动课堂内容预览">
         <div className="classroom-preview-topline"><span>01 / 光栅衍射</span><Aperture size={20} /></div>
         <div className="classroom-spectrum" aria-hidden="true"><i /><i /><i /><i /><i /></div>
@@ -541,25 +554,47 @@ function AssistantModule({ journey, navigate }: { journey: ExperimentJourney; na
           <div className="classroom-preview-row"><span>AI 教师引导</span><strong>开始探索 <ArrowRight size={15} /></strong></div>
         </div>
       </aside>
-    </main>
-    <p className="classroom-launch-footnote">首次使用时，按课堂页面提示登录或输入访问码。</p>
-  </div>;
+      <p className="classroom-launch-footnote">首次使用时，请按课堂页面提示输入访问码。</p>
+    </section>;
+  }
 
-  return <div className="openmaic-fullscreen">
-    <iframe
-      className="openmaic-iframe-full"
-      src={OPENMAIC_URL}
-      title="SPECTRA 互动课堂"
-      allow="microphone; camera; autoplay; fullscreen; clipboard-write"
-    />
-    <a className="openmaic-open-external" href={OPENMAIC_URL} target="_blank" rel="noreferrer">
-      无法显示课堂？在新窗口打开 <ExternalLink size={15} />
-    </a>
-    <button className="openmaic-back-btn" onClick={() => navigate("home")} aria-label="返回主站">
-      <ArrowLeft size={18} />
-      <span>返回主站</span>
-    </button>
-  </div>;
+  return <section className="classroom-embed-shell" aria-label="SPECTRA 互动课堂">
+    <div className="classroom-embed-toolbar">
+      <button className="classroom-embed-action classroom-embed-back" onClick={() => setClassroomOpen(false)}>
+        <ArrowLeft size={17} />
+        <span>返回互动课堂</span>
+      </button>
+      <div className="classroom-embed-status" aria-live="polite">
+        <span><i className={classroomReady ? "ready" : ""} />SPECTRA 互动课堂</span>
+        <small>{classroomReady ? "课堂已连接" : "正在加载课堂"}</small>
+      </div>
+      <div className="classroom-embed-actions">
+        <button className="classroom-embed-action" onClick={reloadClassroom}>
+          <RotateCcw size={16} />
+          <span>课堂首页</span>
+        </button>
+        <a className="classroom-embed-action" href={OPENMAIC_URL} target="_blank" rel="noreferrer">
+          <ExternalLink size={16} />
+          <span>新窗口打开</span>
+        </a>
+      </div>
+    </div>
+    <div className="classroom-embed-frame">
+      {!classroomReady && <div className="classroom-loading" role="status">
+        <LoaderCircle size={23} />
+        <strong>正在加载互动课堂</strong>
+        <span>首次进入可能需要输入访问码</span>
+      </div>}
+      <iframe
+        key={classroomKey}
+        className={`openmaic-iframe-full ${classroomReady ? "is-ready" : ""}`}
+        src={OPENMAIC_URL}
+        title="SPECTRA 互动课堂"
+        allow="microphone; camera; autoplay; clipboard-write"
+        onLoad={() => setClassroomReady(true)}
+      />
+    </div>
+  </section>;
 }
 
 function lineColor(wavelengthNm: number) {
@@ -1756,5 +1791,5 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}>{active !== "assistant" && <AppHeader active={active} onChange={setActive} authenticated={authenticated} authHref={authHref} authLabel={authLabel} viewerName={viewerName} />}{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModuleV2 key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} authenticated={authenticated} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule authenticated={authenticated} authHref={authHref} />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
+  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} authenticated={authenticated} authHref={authHref} authLabel={authLabel} viewerName={viewerName} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModuleV2 key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} authenticated={authenticated} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule authenticated={authenticated} authHref={authHref} />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
 }
