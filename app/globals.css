@@ -717,7 +717,7 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
   color: #72e4ff; font-size: .86rem; font-weight: 750; letter-spacing: .09em; text-transform: uppercase;
 }
 .classroom-launch-copy h1 {
-  margin: 0; color: #fff; font-size: clamp(3rem, 6.8vw, 5.6rem); font-weight: 740; letter-spacing: -.075em; line-height: .98;
+  margin: 0; color: #fff; font-size: clamp(2.65rem, 4.8vw, 4.25rem); font-weight: 740; letter-spacing: -.06em; line-height: 1.06;
 }
 .classroom-launch-copy h1 em { color: #68dff6; font-style: normal; }
 .classroom-launch-intro { max-width: 510px; margin: 29px 0 0; color: #bfd3e4; font-size: clamp(1rem, 1.4vw, 1.12rem); line-height: 1.8; }
@@ -743,14 +743,14 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 .classroom-spectrum i:nth-child(1) { height: 45%; color: #8f8aff; background: #8f8aff; }.classroom-spectrum i:nth-child(2) { height: 74%; color: #77e6ff; background: #77e6ff; }.classroom-spectrum i:nth-child(3) { height: 94%; color: #b8f5d2; background: #b8f5d2; }.classroom-spectrum i:nth-child(4) { height: 57%; color: #fff1a2; background: #fff1a2; }.classroom-spectrum i:nth-child(5) { height: 82%; color: #f69aea; background: #f69aea; }
 .classroom-preview-body { padding: 25px 24px 23px; }
 .classroom-preview-label { color: #70e4f8; font-size: .76rem; font-weight: 750; letter-spacing: .08em; }
-.classroom-preview-body > p { margin: 10px 0 24px; color: #eff8ff; font-size: 1.1rem; font-weight: 640; line-height: 1.55; }
+.classroom-preview-body > p { margin: 10px 0 24px; color: #eff8ff; font-size: 1rem; font-weight: 640; line-height: 1.6; }
 .classroom-preview-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 15px; border-top: 1px solid rgba(183, 224, 247, .15); color: #9ab9cd; font-size: .8rem; }
 .classroom-preview-row strong { display: inline-flex; align-items: center; gap: 4px; color: #e9fbff; font-size: .8rem; }
 .classroom-launch-footnote { position: fixed; right: clamp(24px, 5vw, 84px); bottom: 23px; margin: 0; color: #799ab2; font-size: .76rem; }
 @media (max-width: 760px) {
   .classroom-launch { padding: 23px 23px 44px; overflow-y: auto; }
   .classroom-launch-stage { grid-template-columns: 1fr; gap: 46px; min-height: auto; margin: 58px auto 24px; }
-  .classroom-launch-copy h1 { font-size: clamp(3.1rem, 15vw, 4.65rem); }
+  .classroom-launch-copy h1 { font-size: clamp(2.5rem, 12vw, 3.6rem); }
   .classroom-course-preview { width: 100%; justify-self: stretch; }
   .classroom-launch-footnote { position: static; margin-top: 16px; }
 }
