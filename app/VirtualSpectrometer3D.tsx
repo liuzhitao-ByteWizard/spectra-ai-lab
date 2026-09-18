@@ -9,7 +9,7 @@ import {
   Maximize2, Move3D, Rotate3D, RotateCcw, Target, Telescope,
 } from "lucide-react";
 import { toast } from "sonner";
-import { measureGrating, SPECTRAL_LIBRARY, type MeasurementLine, type SpectrumLine } from "@/lib/spectrometer";
+import { SPECTRAL_LIBRARY, type SpectrumLine } from "@/lib/spectrometer";
 import type { ExperimentJourney } from "@/lib/experiment-journey";
 
 type ModuleId = "home" | "simulator" | "assistant" | "analysis" | "records";
@@ -135,7 +135,9 @@ const quantizeArcminute = (value: number) => Math.round(value * 60) / 60;
 // These shared coordinates connect the physical model, ray tracing and eyepiece.
 // φ = 0° points along the collimator-to-grating axis; positive φ follows the
 // right-hand +1 order in the scene and on the main vernier.
-const OPTICAL_AXIS_Y = 1.47;
+// Keep both tube mouths and the independent grating carrier on one mechanical
+// optical axis. The carrier center is at y=1.52 in the scene model.
+const OPTICAL_AXIS_Y = 1.52;
 const OPTICAL_AXIS_Z = .03;
 const COLLIMATOR_MOUTH_X = -1.30;
 const TELESCOPE_MOUTH_X = 1.30;
@@ -307,11 +309,11 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               ? `零级基准：${formatDms(zeroReference.mean)}；可重新标定。`
               : "零级线已在叉丝中心，可记录基准。";
   const usableReadings = records.filter((record) => record.thetaDeg > .01);
-  const fit = useMemo(() => {
-    if (usableReadings.length < 2) return null;
-    try {
-      return measureGrating(usableReadings.map((record) => ({ wavelengthNm: record.wavelengthNm, thetaDeg: record.thetaDeg })));
-    } catch { return null; }
+  const wavelengthResult = useMemo(() => {
+    if (!usableReadings.length) return null;
+    const meanNm = usableReadings.reduce((sum, record) => sum + record.calculatedNm, 0) / usableReadings.length;
+    const rmseNm = Math.sqrt(usableReadings.reduce((sum, record) => sum + (record.calculatedNm - record.wavelengthNm) ** 2, 0) / usableReadings.length);
+    return { meanNm, rmseNm };
   }, [usableReadings]);
   const errorText = useMemo(() => {
     if (!records.length) return "尚无谱线读数";
@@ -327,11 +329,11 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       prelab: {
         source: "mercury",
         capturedLines: lightSource === "mercury" ? records.length : 0,
-        dUm: lightSource === "mercury" ? fit?.dUm ?? null : null,
-        rmseNm: lightSource === "mercury" ? fit?.rmseNm ?? null : null,
+        dUm: lightSource === "mercury" && records.length >= 2 ? 1_000 / linesPerMm : null,
+        rmseNm: lightSource === "mercury" ? wavelengthResult?.rmseNm ?? null : null,
       },
     });
-  }, [lightSource, records.length, fit?.dUm, fit?.rmseNm, updateJourney]);
+  }, [lightSource, records.length, linesPerMm, wavelengthResult?.rmseNm, updateJourney]);
 
   useEffect(() => {
     if (directedObservationOrder !== null && observationOrder !== directedObservationOrder) {
@@ -569,6 +571,18 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       addVerticalTube(instrument, .16, .14, .06, [x, -.92, z], matteBlack, 24);
     }
 
+    const bench = new THREE.Group();
+    instrument.add(bench);
+    addBox(bench, [8.75, .16, .32], [.05, 1.13, .32], railMetal);
+    addBox(bench, [7.45, .09, .42], [.1, 1.01, .28], baseGray);
+    addBox(bench, [.26, .84, .3], [-3.48, .67, .32], baseGray);
+    addBox(bench, [.26, .78, .3], [3.38, .69, .32], baseGray);
+    addBox(bench, [1.25, .19, .5], [-3.02, .66, .32], baseGray);
+    addBox(bench, [1.06, .19, .5], [2.86, .68, .32], baseGray);
+    // Raise the shared parallel-tube support directly beneath the two barrels
+    // and the independent grating, without changing their optical axis.
+    bench.position.y = .02;
+
     const stageGroup = new THREE.Group();
     instrument.add(stageGroup);
     // A self-contained, raised grating carriage: the photo reference shows this
@@ -668,7 +682,8 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     addHorizontalTube(telescopeBody, .26, .24, .66, [1.18, opticalAxisY, .03], carbon);
     addKnurledSleeve(telescopeBody, .32, .26, [1.55, opticalAxisY, .03], sootBlack);
     addHorizontalTube(telescopeBody, .22, .22, 1.62, [2.5, opticalAxisY, .03], aluminum);
-    addHorizontalTube(telescopeBody, .12, .12, 1.55, [2.63, opticalAxisY + .2, .03], brightMetal, 24);
+    // Inner focusing tube stays coaxial with the outer telescope barrel.
+    addHorizontalTube(telescopeBody, .12, .12, 1.55, [2.63, opticalAxisY, .03], brightMetal, 24);
     addRing(telescopeBody, [1.82, opticalAxisY, .03], .25, .025, brightMetal);
     addRing(telescopeBody, [3.18, opticalAxisY, .03], .25, .026, railMetal);
     addHorizontalTube(telescopeBody, .23, .3, .42, [3.53, opticalAxisY, .03], carbon);
@@ -775,12 +790,11 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const jawCenter = .09 + slitOptics.jawGap / 2;
     runtime.slitJaws[0].position.y = jawCenter;
     runtime.slitJaws[1].position.y = -jawCenter;
-    const lampColor = lampOn ? sourceProfile.beamColor : "#293845";
-    const lampEmissive = lampOn ? sourceProfile.beamColor : "#000000";
-    runtime.lamp.material.color.set(lampColor);
-    runtime.lamp.material.emissive.set(lampEmissive);
+    const sourceColor = sourceProfile.beamColor;
     runtime.lamp.material.emissiveIntensity = lampOn ? 2.2 : 0;
-    runtime.lampHalo.color.set(lampOn ? sourceProfile.beamColor : "#000000");
+    runtime.lamp.material.color.set(lampOn ? sourceColor : "#293845");
+    runtime.lamp.material.emissive.set(lampOn ? sourceColor : "#08090e");
+    runtime.lampHalo.color.set(sourceColor);
     runtime.lampHalo.intensity = lampOn ? 2.7 : 0;
     while (runtime.beams.children.length) {
       const child = runtime.beams.children.pop();
@@ -1137,8 +1151,8 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
           <div className="reading-table-wrap">
             {records.length ? <table className="virtual-reading-table"><thead><tr><th>光源</th><th>侧 / 级次</th><th>谱线</th><th>游标 A</th><th>游标 B</th><th>校正 θ</th><th>反算 λ</th><th>相对误差</th></tr></thead><tbody>{records.map((record) => <tr key={record.id} className={record.aligned ? "" : "has-warning"}><td>{LIGHT_SOURCES[record.source].shortName}</td><td>{record.order === 1 ? "右 +1" : "左 −1"}</td><td><i style={{ background: LIGHT_SOURCES[record.source].lines.find((line) => line.wavelengthNm === record.wavelengthNm)?.color }} />{record.wavelengthNm.toFixed(2)} nm · {record.label}</td><td>{formatDms(record.raw.a)}</td><td>{formatDms(record.raw.b)}</td><td>{record.thetaDeg.toFixed(3)}°</td><td>{record.calculatedNm.toFixed(2)} nm</td><td>{record.errorPercent >= 0 ? "+" : ""}{record.errorPercent.toFixed(2)}%</td></tr>)}</tbody></table> : <div className="measurement-empty"><Telescope size={27} /><strong>尚未记录谱线</strong><p>对准零级并记录参考后，可测量左右任一侧的一级特征线。</p></div>}
           </div>
-          <div className={`fit-summary ${fit ? "has-fit" : ""}`}>
-            {fit ? <><small>由 {records.length} 条一级读数联合拟合</small><strong>d = {fit.dUm.toFixed(3)} μm</strong><span>{linesPerMm} 线/mm · RMSE {fit.rmseNm.toFixed(2)} nm</span><p><CheckCircle2 size={16} />{errorText}</p><button onClick={() => navigate("analysis")}>打开图像分析 <ArrowRight size={15} /></button></> : <><Aperture size={28} /><strong>等待两条有效谱线</strong><p>零级差值会自动用于每条一级读数的衍射角计算。</p></>}
+          <div className={`fit-summary ${wavelengthResult ? "has-fit" : ""}`}>
+            {wavelengthResult ? <><small>由 {records.length} 条一级读数求平均</small><strong>λ̄ = {wavelengthResult.meanNm.toFixed(2)} nm</strong><span>已知光栅 {linesPerMm} 线/mm · RMSE {wavelengthResult.rmseNm.toFixed(2)} nm</span><p><CheckCircle2 size={16} />{errorText}</p><button onClick={() => navigate("analysis")}>打开图像分析 <ArrowRight size={15} /></button></> : <><Aperture size={28} /><strong>等待波长读数</strong><p>零级差值与已知光栅间距会自动计算 λ = d sin θ。</p></>}
           </div>
         </div>
         <p className={`error-explainer ${records.length ? "has-data" : ""}`}><CircleAlert size={17} /><span><b>当前诊断：</b>{errorText}。系统会保留真实读数与偏差，便于复核零级、法线与像质条件。</span></p>
