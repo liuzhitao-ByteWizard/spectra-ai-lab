@@ -664,7 +664,8 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     addHorizontalTube(telescopeBody, .26, .24, .66, [1.18, opticalAxisY, .03], carbon);
     addKnurledSleeve(telescopeBody, .32, .26, [1.55, opticalAxisY, .03], sootBlack);
     addHorizontalTube(telescopeBody, .22, .22, 1.62, [2.5, opticalAxisY, .03], aluminum);
-    addHorizontalTube(telescopeBody, .12, .12, 1.55, [2.63, opticalAxisY + .2, .03], brightMetal, 24);
+    // Inner focusing tube stays coaxial with the outer telescope barrel.
+    addHorizontalTube(telescopeBody, .12, .12, 1.55, [2.63, opticalAxisY, .03], brightMetal, 24);
     addRing(telescopeBody, [1.82, opticalAxisY, .03], .25, .025, brightMetal);
     addRing(telescopeBody, [3.18, opticalAxisY, .03], .25, .026, railMetal);
     addHorizontalTube(telescopeBody, .23, .3, .42, [3.53, opticalAxisY, .03], carbon);
