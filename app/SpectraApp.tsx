@@ -22,15 +22,6 @@ import {
   wavelengthFromPixelDiff,
 } from "@/lib/spectrometer";
 import {
-  extractIntensityProfile,
-  detectPeaks as detectPeaksNew,
-  autoMatch as autoMatchNew,
-  calibrate as calibrateNew,
-  predictWavelength,
-  MERCURY_LINES,
-  type DetectedPeak,
-} from "@/lib/spectral-inversion";
-import {
   RecordRequestError, requestRecordJson, type ExperimentImageSlot,
   type ExperimentTask, type RecordSnapshot, type SavedRecord,
 } from "@/lib/experiment-record";
@@ -48,7 +39,6 @@ type SpectrumSource = {
   preview: string | null; fileName: string; width: number; height: number;
   rawIntensity: number[]; luminanceIntensity: number[]; chromaIntensity: number[]; red: number[]; green: number[]; blue: number[];
   overexposed: boolean; sharpnessOk: boolean; tilt: number; bandWidth: number; sample?: boolean;
-  pixels?: Uint8ClampedArray;
 };
 type ImageAnalysis = SpectrumSource & { smoothIntensity: number[]; peaks: Peak[] };
 type ReferenceMarker = { wavelengthNm: number; xRatio: number };
@@ -139,50 +129,73 @@ function classifyPeakColor(source: SpectrumSource, x: number) {
 }
 
 function detectSpectrumPeaks(source: SpectrumSource, options: DetectorOptions): ImageAnalysis {
+  // Radius 1 keeps the 576.96/579.07 nm doublet separated.  The former
+  // seven-pixel kernel merged it into one broad peak on phone photos.
   const smooth = smoothIntensity(source.rawIntensity, 1);
+  const smoothChroma = smoothIntensity(source.chromaIntensity, 1);
+  const candidates: { x: number; score: number; prominence: number; widthPx: number }[] = [];
   const minDistance = Number.isFinite(options.minDistancePx) ? Math.min(64, Math.max(2, options.minDistancePx)) : 3;
   const requiredProminence = Number.isFinite(options.prominence) ? Math.min(.2, Math.max(.004, options.prominence)) : .018;
-
-  // 新算法：饱和度强度 + 分色通道检测
-  let newPeaks: DetectedPeak[] = [];
-  if (source.pixels) {
-    const profile = extractIntensityProfile(source.pixels, source.width, source.height);
-    newPeaks = detectPeaksNew(profile, source.pixels, source.width, source.height, {
-      prominence: requiredProminence,
-      minDistance,
-    });
+  const radius = Math.max(10, minDistance * 4);
+  for (let x = 2; x < smooth.length - 2; x++) {
+    if (smooth[x] < smooth[x - 1] || smooth[x] <= smooth[x + 1]) continue;
+    const left = smooth.slice(Math.max(0, x - radius), x);
+    const right = smooth.slice(x + 1, Math.min(smooth.length, x + radius + 1));
+    const baseline = Math.max(Math.min(...left), Math.min(...right));
+    const prominence = smooth[x] - baseline;
+    const chromaLeft = smoothChroma.slice(Math.max(0, x - radius), x);
+    const chromaRight = smoothChroma.slice(x + 1, Math.min(smooth.length, x + radius + 1));
+    const chromaBaseline = Math.max(Math.min(...chromaLeft), Math.min(...chromaRight));
+    const chromaProminence = smoothChroma[x] - chromaBaseline;
+    const halfHeight = baseline + prominence * .5;
+    let leftEdge = x, rightEdge = x;
+    while (leftEdge > Math.max(0, x - radius) && smooth[leftEdge] > halfHeight) leftEdge--;
+    while (rightEdge < Math.min(smooth.length - 1, x + radius) && smooth[rightEdge] > halfHeight) rightEdge++;
+    const widthPx = rightEdge - leftEdge;
+    // Camera spectra form a small luminous band. Single-pixel bright/dark
+    // reticles can be locally prominent but have neither chromatic support nor
+    // enough width, so they are rejected without assuming a fixed line count.
+    // Interference lines (short, thin, dim artifacts near the crosshair) are
+    // filtered by requiring high absolute intensity, high prominence, and
+    // strong chroma saturation — real Hg lines are bright and wide.
+    const spectralShape = widthPx >= 3 && chromaProminence >= Math.max(.018, prominence * .3);
+    const strongEnough = smooth[x] >= .14 && prominence >= Math.max(requiredProminence, .05);
+    if (strongEnough && spectralShape) {
+      const denominator = smooth[x - 1] - 2 * smooth[x] + smooth[x + 1];
+      const offset = Math.abs(denominator) > 1e-8 ? Math.max(-.5, Math.min(.5, .5 * (smooth[x - 1] - smooth[x + 1]) / denominator)) : 0;
+      candidates.push({ x: x + offset, score: smooth[x], prominence, widthPx });
+    }
   }
-
-  // 映射为 Peak 类型
-  const peaks = newPeaks.map((np) => {
-    const mapped = MERCURY_LINES.find((l) => np.family === l.key || (np.family === "yellow" && l.key.startsWith("yellow")));
+  const selected: typeof candidates = [];
+  for (const candidate of candidates.sort((a, b) => (b.prominence + b.score * .2) - (a.prominence + a.score * .2))) {
+    const near = selected.find((item) => Math.abs(item.x - candidate.x) < minDistance);
+    if (!near) selected.push(candidate);
+    else {
+      const lo = Math.ceil(Math.min(near.x, candidate.x));
+      const hi = Math.floor(Math.max(near.x, candidate.x));
+      const valley = smooth.slice(lo, hi + 1).reduce((minimum, value) => Math.min(minimum, value), Number.POSITIVE_INFINITY);
+      const separated = Math.min(near.score, candidate.score) - valley > Math.max(.003, requiredProminence * .18);
+      // Resolved close lines are meaningful in every colour family. Generic
+      // NMS must suppress duplicate noise peaks, not merge a real doublet.
+      const plausibleWidths = near.widthPx >= 1.5 && candidate.widthPx >= 1.5;
+      if (separated && plausibleWidths) selected.push(candidate);
+    }
+    if (selected.length === 16) break;
+  }
+  selected.sort((a, b) => a.x - b.x);
+  const peaks = selected.map((item) => {
+    const classified = classifyPeakColor(source, item.x);
+    const mapped = SPECTRAL_LIBRARY.mercury.find((line) => line.family === classified.family);
     return {
-      x: np.x, xRatio: np.x / Math.max(source.width, 1),
-      family: np.family === "unknown" ? classifyPeakColor(source, np.x).family : np.family,
-      color: np.family !== "unknown" ? np.color : classifyPeakColor(source, np.x).color,
-      confidence: Math.min(.99, .68 + np.height * 1.5),
-      prominence: np.height, widthPx: 3, wavelengthNm: mapped?.wavelength,
+      x: item.x, xRatio: item.x / Math.max(source.width, 1), family: classified.family,
+      color: classified.color, confidence: Math.min(.99, .68 + item.prominence * 3.2 + item.score * .14), prominence: item.prominence, widthPx: item.widthPx, wavelengthNm: mapped?.wavelengthNm,
     };
   });
-
   return { ...source, smoothIntensity: smooth, peaks };
 }
 
 function autoMatchMercuryPeaks(image: ImageAnalysis): ReferenceMarker[] {
   if (image.peaks.length < 2) return [];
-  // 新算法：组合搜索 + RMSE 评分（坐标下降标定）
-  const detectedPeaks: DetectedPeak[] = image.peaks.map((p) => ({
-    x: p.x, height: p.prominence, family: p.family, color: p.color,
-  }));
-  try {
-    const matches = autoMatchNew(detectedPeaks, 3.333, image.width);
-    if (matches.length >= 2) {
-      return matches
-        .map((m) => ({ wavelengthNm: m.standard.wavelength, xRatio: m.peak.x / Math.max(image.width, 1) }))
-        .sort((a, b) => a.xRatio - b.xRatio);
-    }
-  } catch { /* fall through to legacy */ }
-  // 回退：旧算法
   const peaks = [...image.peaks].sort((a, b) => a.x - b.x).slice(0, 16);
   const lines = [...SPECTRAL_LIBRARY.mercury].sort((a, b) => a.wavelengthNm - b.wavelengthNm);
   const best: { value: { score: number; markers: ReferenceMarker[]; count: number } | null } = { value: null };
@@ -194,10 +207,14 @@ function autoMatchMercuryPeaks(image: ImageAnalysis): ReferenceMarker[] {
         for (let index = 0; index < chosenPeaks.length; index++) {
           const expected = mappedLines[index].family;
           const actual = chosenPeaks[index].family;
+          // Reticles may be geometrically prominent, but do not carry the hue
+          // of a mercury line. Keep blue/violet tolerant and make the green
+          // line and yellow doublet strict colour matches.
           const familyPenalty = expected === actual ? 0 :
             ((expected === "violet" && actual === "blue") || (expected === "blue" && actual === "violet")) ? .7 : 12;
           score += familyPenalty + (1 - chosenPeaks[index].confidence) * .45;
         }
+        // The mercury yellow doublet should be adjacent and relatively close.
         const yellow = chosenPeaks.filter((_, index) => mappedLines[index].family === "yellow");
         if (yellow.length === 2) score += Math.min(2, Math.abs(yellow[1].x - yellow[0].x) / Math.max(image.width * .08, 1));
         const meanWavelength = mappedLines.reduce((sum, line) => sum + line.wavelengthNm, 0) / mappedLines.length;
@@ -256,11 +273,7 @@ async function analyzeImageFile(file: File): Promise<SpectrumSource> {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("浏览器无法读取图像");
   context.drawImage(bitmap, 0, 0, width, height);
-  const imageData = context.getImageData(0, 0, width, height);
-  const pixels = imageData.data;
-  // 新算法：饱和度×亮度加权，只取垂直 12%–88% 带
-  const newProfile = extractIntensityProfile(pixels, width, height);
-  // 兼容旧字段
+  const pixels = context.getImageData(0, 0, width, height).data;
   const y0 = Math.floor(height * .2), y1 = Math.ceil(height * .8);
   const scores = new Array(width).fill(0), luminances = new Array(width).fill(0), chromas = new Array(width).fill(0), reds = new Array(width).fill(0), greens = new Array(width).fill(0), blues = new Array(width).fill(0);
   let over = 0, sampled = 0, totalWeight = 0;
@@ -283,12 +296,11 @@ async function analyzeImageFile(file: File): Promise<SpectrumSource> {
   const edgeEnergy = luminanceIntensity.slice(1).reduce((sum, value, index) => sum + Math.abs(value - luminanceIntensity[index]), 0) / Math.max(width - 1, 1);
   return {
     preview: URL.createObjectURL(file), fileName: file.name, width, height,
-    rawIntensity: Array.from(newProfile),
+    rawIntensity: scores.map((value) => Math.min(1, value / Math.max(totalWeight * 255, 1))),
     luminanceIntensity,
     chromaIntensity: chromas.map((value) => Math.min(1, value / Math.max(totalWeight * 255, 1))),
     red: reds.map((value) => value / sampleRows), green: greens.map((value) => value / sampleRows), blue: blues.map((value) => value / sampleRows),
     overexposed: over / Math.max(sampled, 1) > .045, sharpnessOk: edgeEnergy > .0018, tilt: .7, bandWidth: width,
-    pixels,
   };
 }
 
@@ -845,34 +857,48 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticat
     setAComplete(false); setCalibResult(null);
   };
 
-  // 执行标定：坐标下降优化 x₀ 和 L（新算法）
+  // 执行标定：用全部已知线最小二乘拟合 L 和 x₀，提高精度
   const runCalibration = useCallback(() => {
     if (!aImage) { toast.warning("请先上传光谱图"); return; }
     if (aImage.overexposed) { toast.warning("谱图过曝，结果已阻止；请降低曝光后重新拍摄"); return; }
     if (!aImage.sharpnessOk) { toast.warning("谱图清晰度不足，结果已阻止；请重新对焦"); return; }
     if (usableReadings.length < 2) { toast.error("需要至少两条已标记谱线"); return; }
     try {
+      const dNm = 3333.333;
       const sorted = [...usableReadings].sort((a, b) => a.wavelengthNm - b.wavelengthNm);
-      const matched = sorted.map((line) => ({
-        peak: { x: line.xPx, height: 1, family: "", color: "" },
-        standard: { key: "", label: "", colorName: "", wavelength: line.wavelengthNm, color: "" },
-      }));
-      const calib = calibrateNew(matched, 3.333, aImage.width);
-      const thetaMin = Math.asin(sorted[0].wavelengthNm / (calib.dUm * 1000));
-      const x1 = calib.effectiveLPx * Math.tan(thetaMin);
-      setCalibResult({
-        dNm: calib.dUm * 1000, dUm: calib.dUm, Lpx: calib.effectiveLPx,
-        x0Px: calib.x0Px, x1Px: x1,
-        x2Px: x1 + Math.abs(sorted[1].xPx - sorted[0].xPx),
-        deltaPx: Math.abs(sorted[1].xPx - sorted[0].xPx),
-        reversed: calib.reversed,
-        theta1Deg: thetaMin * 180 / Math.PI,
-        theta2Deg: Math.asin(sorted[1].wavelengthNm / (calib.dUm * 1000)) * 180 / Math.PI,
-        line1: { wavelengthNm: sorted[0].wavelengthNm, xPx: sorted[0].xPx },
-        line2: { wavelengthNm: sorted[1].wavelengthNm, xPx: sorted[1].xPx },
+      // 模型：xᵢ = x₀ + u · tan(θᵢ)，其中 θᵢ = arcsin(λᵢ/d)，u = ±L
+      // 最小二乘解 [x₀, u]
+      const rows = sorted.map((line) => {
+        const theta = Math.asin(line.wavelengthNm / dNm);
+        return { t: Math.tan(theta), x: line.xPx, lam: line.wavelengthNm };
       });
+      // 正规方程：AᵀA·p = Aᵀb
+      let stt = 0, st = 0, sx = 0, stx = 0, n = 0;
+      for (const r of rows) { stt += r.t * r.t; st += r.t; sx += r.x; stx += r.t * r.x; n++; }
+      const det = n * stt - st * st;
+      if (Math.abs(det) < 1e-15) throw new Error("谱线角度过于接近，无法拟合");
+      const x0 = (stt * sx - st * stx) / det;
+      const u = (n * stx - st * sx) / det;
+      const L = Math.abs(u);
+      const reversed = u < 0;
+      // x₁ = 零级到最短波长线的距离
+      const thetaMin = Math.asin(sorted[0].wavelengthNm / dNm);
+      const x1 = L * Math.tan(thetaMin);
+      // 验证
+      let maxErr = 0;
+      for (const r of rows) {
+        const pred = Math.abs(dNm * (r.x - x0) / Math.sqrt((r.x - x0) ** 2 + L * L));
+        maxErr = Math.max(maxErr, Math.abs(pred - r.lam));
+      }
+      if (maxErr > 3) throw new Error(`标定验证失败：最大残差 ${maxErr.toFixed(1)} nm，超过 3 nm`);
+      const calib = {
+        dNm, dUm: dNm / 1000, Lpx: L, x0Px: x0, x1Px: x1, x2Px: x1 + Math.abs(sorted[1].xPx - sorted[0].xPx),
+        deltaPx: Math.abs(sorted[1].xPx - sorted[0].xPx), reversed, order: 1,
+        theta1Deg: thetaMin * 180 / Math.PI, theta2Deg: Math.asin(sorted[1].wavelengthNm / dNm) * 180 / Math.PI,
+      };
+      setCalibResult({ ...calib, line1: { wavelengthNm: sorted[0].wavelengthNm, xPx: sorted[0].xPx }, line2: { wavelengthNm: sorted[1].wavelengthNm, xPx: sorted[1].xPx } });
       setAComplete(true);
-      toast.success(`标定完成：d = ${calib.dUm.toFixed(3)} μm，L = ${calib.effectiveLPx.toFixed(0)} px，RMSE = ${calib.rmseNm.toFixed(2)} nm`);
+      toast.success(`标定完成：d = ${calib.dUm.toFixed(3)} μm，L = ${calib.Lpx.toFixed(0)} px，用 ${n} 条线拟合`);
     } catch (error) { toast.error(error instanceof Error ? error.message : "标定失败"); }
   }, [usableReadings, aImage]);
 
@@ -911,16 +937,13 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticat
       }
       try {
         const [c1, c2] = bestPair;
-        // 用新算法坐标下降标定（两条线也能解 x₀ 和 L）
-        const pairCalib = calibrateNew(
-          [
-            { peak: { x: c1.xPx, height: 1, family: "", color: "" }, standard: { key: "", label: "", colorName: "", wavelength: c1.wavelengthNm, color: "" } },
-            { peak: { x: c2.xPx, height: 1, family: "", color: "" }, standard: { key: "", label: "", colorName: "", wavelength: c2.wavelengthNm, color: "" } },
-          ],
-          3.333,
-          aImage.width,
-        );
-        const predicted = predictWavelength(target.xPx, pairCalib.dUm * 1000, pairCalib.x0Px, pairCalib.effectiveLPx);
+        const calib = calibrateFromPixelDiff(c1.wavelengthNm, c1.xPx, c2.wavelengthNm, c2.xPx);
+        const shortLine = c1.wavelengthNm <= c2.wavelengthNm ? c1 : c2;
+        const longLine = c1.wavelengthNm <= c2.wavelengthNm ? c2 : c1;
+        const reversed = shortLine.xPx > longLine.xPx;
+        const zeroXPx = reversed ? shortLine.xPx + calib.x1Px : shortLine.xPx - calib.x1Px;
+        const x3Px = Math.abs(target.xPx - zeroXPx);
+        const predicted = Math.abs(calib.dNm * x3Px / Math.sqrt(x3Px * x3Px + calib.Lpx * calib.Lpx));
         results.push({
           wavelengthNm: predicted,
           standardNm: target.wavelengthNm,
