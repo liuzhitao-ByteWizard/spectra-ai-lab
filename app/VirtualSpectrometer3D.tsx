@@ -680,7 +680,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const fixedVerniers = new THREE.Group();
     instrument.add(fixedVerniers);
     const vernierPlateMaterial = new THREE.MeshStandardMaterial({
-      color: "#e2b85f", emissive: "#4d3510", emissiveIntensity: .35, metalness: .28, roughness: .42,
+      color: "#d9e5ee", emissive: "#91a8b8", emissiveIntensity: .12, metalness: .35, roughness: .38,
       transparent: true, opacity: .96, side: THREE.DoubleSide, depthTest: false, depthWrite: false,
     });
     const vernierTickMaterial = new THREE.MeshBasicMaterial({ color: "#4d3405", depthTest: false, depthWrite: false });
