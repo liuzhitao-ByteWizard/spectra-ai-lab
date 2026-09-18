@@ -575,7 +575,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     addBox(bench, [1.06, .19, .5], [2.86, .68, .32], baseGray);
     // Raise the shared parallel-tube support directly beneath the two barrels
     // and the independent grating, without changing their optical axis.
-    bench.position.y = .2;
+    bench.position.y = .02;
 
     const stageGroup = new THREE.Group();
     instrument.add(stageGroup);
