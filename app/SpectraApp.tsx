@@ -1024,11 +1024,14 @@ function ImageStage({
                 left: `${left}px`,
                 top: `${top}px`,
                 height: `${height}px`,
+                width: "0",
                 "--marker-color": marker.color || "#1f7a5a",
               } as React.CSSProperties}
               title={marker.label}
               aria-label={marker.label}
-            />
+            >
+              <i className="marker-core" />
+            </span>
           );
         })}
       </div>
@@ -1376,9 +1379,12 @@ function ExperimentCard({
   );
 }
 
+// 可选光栅刻线密度（线/mm）；对应光栅常数 d = 1000 / N（μm）
+const GRATING_LINES = [300, 600, 1200];
+
 function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticated, finishExperiment }: { analyzeSignal?: number; journey: ExperimentJourney; updateJourney: (patch: Partial<ExperimentJourney>) => void; authenticated: boolean; finishExperiment: () => void }) {
   const task: ExperimentTask = "A";
-  const [dUmText, setDUmText] = useState("3.333");
+  const [linesPerMm, setLinesPerMm] = useState(300);
   const [prominence, setProminence] = useState(0.035);
   const [minDistance, setMinDistance] = useState(8);
   const [selectedLineKey, setSelectedLineKey] = useState<MercuryLineKey>("green");
@@ -1448,7 +1454,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticat
     setStatus("idle");
     setErrorMessage("");
     setManualPoints([]);
-    setDUmText("3.333");
+    setLinesPerMm(300);
     setProminence(0.035);
     setMinDistance(8);
     pendingImagesRef.current = { A: {} };
@@ -1466,7 +1472,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticat
     setResult(null);
     try {
       const next = await analyzeSpectrumOffline(file, {
-        dUm: Number(dUmText || "3.333"),
+        dUm: 1000 / linesPerMm,
         prominence,
         minDistance,
         manualPoints,
@@ -1481,7 +1487,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticat
       setStatus("error");
       setErrorMessage(error instanceof Error ? error.message : "标定失败，请检查照片质量。");
     }
-  }, [dUmText, file, minDistance, manualPoints, prominence]);
+  }, [linesPerMm, file, minDistance, manualPoints, prominence]);
 
   useEffect(() => {
     updateJourney({
@@ -1525,7 +1531,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticat
       steps,
       diagnosis,
       payload: {
-        state: { prominence, minDistance, dUmText, complete: hasResult },
+        state: { prominence, minDistance, linesPerMm, complete: hasResult },
         referenceMarkers: lineResiduals.map((line) => ({ wavelengthNm: line.standardNm, xRatio: line.x / Math.max(result?.summary.imageWidth || 1, 1) })),
         result: result ? { ...result } : null,
         processing: { peaks: result?.detectedPeaks.length ?? 0, overexposed: false, sharpnessOk: Boolean(file) },
@@ -1535,7 +1541,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticat
         },
       },
     };
-  }, [diagnosis, file, hasResult, journey.prelab, lineResiduals, dUmText, minDistance, prominence, result, blockReason]);
+  }, [diagnosis, file, hasResult, journey.prelab, lineResiduals, linesPerMm, minDistance, prominence, result, blockReason]);
 
   const hydrateRecord = useCallback(async (record: SavedRecord) => {
     const state = record.payload.state && typeof record.payload.state === "object" ? record.payload.state as Record<string, unknown> : {};
@@ -1543,7 +1549,16 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticat
     setDiagnosis(record.diagnosis);
     if (typeof state.prominence === "number") setProminence(state.prominence);
     if (typeof state.minDistance === "number") setMinDistance(state.minDistance);
-    if (typeof state.dUmText === "string") setDUmText(state.dUmText);
+    if (typeof state.linesPerMm === "number" && GRATING_LINES.includes(state.linesPerMm)) {
+      setLinesPerMm(state.linesPerMm);
+    } else if (typeof state.dUmText === "string") {
+      // 旧记录只存了 d(μm)，反推最接近的刻线密度
+      const dUm = Number(state.dUmText);
+      if (Number.isFinite(dUm) && dUm > 0) {
+        setLinesPerMm(GRATING_LINES.reduce((best, lines) =>
+          (Math.abs(1000 / lines - dUm) < Math.abs(1000 / best - dUm) ? lines : best), GRATING_LINES[0]));
+      }
+    }
     setResult(null);
     setStatus(file ? "ready" : "idle");
   }, [file]);
@@ -1585,8 +1600,12 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, authenticat
                 </div>
               </div>
               <label className="field">
-                <span>光栅常数 d (μm)</span>
-                <input value={dUmText} onChange={(event) => setDUmText(event.target.value)} inputMode="decimal" />
+                <span>光栅刻线密度（线/mm）</span>
+                <select value={linesPerMm} onChange={(event) => setLinesPerMm(Number(event.target.value))}>
+                  {GRATING_LINES.map((lines) => (
+                    <option key={lines} value={lines}>{lines} 线/mm · d = {(1000 / lines).toFixed(3)} μm</option>
+                  ))}
+                </select>
               </label>
               <label className="field">
                 <span>峰值突出度 {prominence.toFixed(3)}</span>
@@ -1841,5 +1860,5 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} authenticated={authenticated} authHref={authHref} authLabel={authLabel} viewerName={viewerName} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModuleV2 key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} authenticated={authenticated} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule authenticated={authenticated} authHref={authHref} />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
+  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} authenticated={authenticated} authHref={authHref} authLabel={authLabel} viewerName={viewerName} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} authenticated={authenticated} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule authenticated={authenticated} authHref={authHref} />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
 }

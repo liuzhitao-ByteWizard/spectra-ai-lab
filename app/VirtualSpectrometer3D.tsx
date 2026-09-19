@@ -135,9 +135,7 @@ const quantizeArcminute = (value: number) => Math.round(value * 60) / 60;
 // These shared coordinates connect the physical model, ray tracing and eyepiece.
 // φ = 0° points along the collimator-to-grating axis; positive φ follows the
 // right-hand +1 order in the scene and on the main vernier.
-// Keep both tube mouths and the independent grating carrier on one mechanical
-// optical axis. The carrier center is at y=1.52 in the scene model.
-const OPTICAL_AXIS_Y = 1.52;
+const OPTICAL_AXIS_Y = 1.47;
 const OPTICAL_AXIS_Z = .03;
 const COLLIMATOR_MOUTH_X = -1.30;
 const TELESCOPE_MOUTH_X = 1.30;
@@ -572,18 +570,6 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
       addVerticalTube(instrument, .16, .14, .06, [x, -.92, z], matteBlack, 24);
     }
 
-    const bench = new THREE.Group();
-    instrument.add(bench);
-    addBox(bench, [8.75, .16, .32], [.05, 1.13, .32], railMetal);
-    addBox(bench, [7.45, .09, .42], [.1, 1.01, .28], baseGray);
-    addBox(bench, [.26, .84, .3], [-3.48, .67, .32], baseGray);
-    addBox(bench, [.26, .78, .3], [3.38, .69, .32], baseGray);
-    addBox(bench, [1.25, .19, .5], [-3.02, .66, .32], baseGray);
-    addBox(bench, [1.06, .19, .5], [2.86, .68, .32], baseGray);
-    // Raise the shared parallel-tube support directly beneath the two barrels
-    // and the independent grating, without changing their optical axis.
-    bench.position.y = .02;
-
     const stageGroup = new THREE.Group();
     instrument.add(stageGroup);
     // A self-contained, raised grating carriage: the photo reference shows this
@@ -683,8 +669,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     addHorizontalTube(telescopeBody, .26, .24, .66, [1.18, opticalAxisY, .03], carbon);
     addKnurledSleeve(telescopeBody, .32, .26, [1.55, opticalAxisY, .03], sootBlack);
     addHorizontalTube(telescopeBody, .22, .22, 1.62, [2.5, opticalAxisY, .03], aluminum);
-    // Inner focusing tube stays coaxial with the outer telescope barrel.
-    addHorizontalTube(telescopeBody, .12, .12, 1.55, [2.63, opticalAxisY, .03], brightMetal, 24);
+    addHorizontalTube(telescopeBody, .12, .12, 1.55, [2.63, opticalAxisY + .2, .03], brightMetal, 24);
     addRing(telescopeBody, [1.82, opticalAxisY, .03], .25, .025, brightMetal);
     addRing(telescopeBody, [3.18, opticalAxisY, .03], .25, .026, railMetal);
     addHorizontalTube(telescopeBody, .23, .3, .42, [3.53, opticalAxisY, .03], carbon);
@@ -791,11 +776,12 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const jawCenter = .09 + slitOptics.jawGap / 2;
     runtime.slitJaws[0].position.y = jawCenter;
     runtime.slitJaws[1].position.y = -jawCenter;
-    const sourceColor = sourceProfile.beamColor;
+    const lampColor = lampOn ? sourceProfile.beamColor : "#293845";
+    const lampEmissive = lampOn ? sourceProfile.beamColor : "#000000";
+    runtime.lamp.material.color.set(lampColor);
+    runtime.lamp.material.emissive.set(lampEmissive);
     runtime.lamp.material.emissiveIntensity = lampOn ? 2.2 : 0;
-    runtime.lamp.material.color.set(lampOn ? sourceColor : "#293845");
-    runtime.lamp.material.emissive.set(lampOn ? sourceColor : "#08090e");
-    runtime.lampHalo.color.set(sourceColor);
+    runtime.lampHalo.color.set(lampOn ? sourceProfile.beamColor : "#000000");
     runtime.lampHalo.intensity = lampOn ? 2.7 : 0;
     while (runtime.beams.children.length) {
       const child = runtime.beams.children.pop();

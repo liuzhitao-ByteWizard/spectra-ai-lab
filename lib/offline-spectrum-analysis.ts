@@ -165,8 +165,10 @@ function classifyHue(hue: number, saturation: number, value: number): DetectedPe
   if (saturation < 0.12 || value < 0.12) return "unknown";
   if (hue >= 35 && hue < 75) return "yellow";
   if (hue >= 75 && hue < 170) return "green";
-  if (hue >= 170 && hue < 245) return "blue";
-  if (hue >= 245 && hue < 330) return "violet";
+  // 白平衡会把色相整体漂移：435.84 蓝线实测可到 ~250°，404.66 紫线在常见取样口径下约 259°，
+  // 两者只隔约 9°，边界必须落在 (250, 259] 之间，取 255°。
+  if (hue >= 170 && hue < 255) return "blue";
+  if (hue >= 255 && hue < 330) return "violet";
   return "unknown";
 }
 
@@ -323,6 +325,117 @@ function channelProfiles(data: ImageData, width: number, height: number) {
   });
 }
 
+// 采样带内某列的“内容支撑度”：亮度足够、确实有内容的行占比。
+// 圆形视场边缘只在少数行覆盖到该列，支撑度会显著低于邻列。
+function contentSupport(data: ImageData, width: number, height: number, x: number) {
+  const bytes = data.data;
+  const column = Math.max(0, Math.min(width - 1, Math.round(x)));
+  const y0 = Math.floor(height * 0.12);
+  const y1 = Math.ceil(height * 0.88);
+  let hit = 0;
+  let count = 0;
+  for (let y = y0; y < y1; y += 1) {
+    const index = (y * width + column) * 4;
+    count += 1;
+    if (Math.max(bytes[index], bytes[index + 1], bytes[index + 2]) >= 77) hit += 1;
+  }
+  return count ? hit / count : 0;
+}
+
+// 候选列必须落在视场内容内部：圆形视场边界处会形成“明暗断崖”，
+// 既高饱和又极易被判成强峰，但只有部分行真正覆盖到内容。
+function hasFieldSupport(data: ImageData, width: number, height: number, x: number) {
+  const off = Math.max(6, Math.round(width * 0.02));
+  const column = Math.max(0, Math.min(width - 1, Math.round(x)));
+  const center = contentSupport(data, width, height, column);
+  const side = Math.max(
+    contentSupport(data, width, height, column - off),
+    contentSupport(data, width, height, column + off),
+  );
+  return side <= 0.08 || center >= 0.65 * side;
+}
+
+// 列彩度剖面的“谱线足迹”：真实谱线在其列上是一道明显的彩度脊，
+// 而视场渐变、叉丝、同一线的肩部峰值落在足迹之外。
+// 足迹 = 局部超额 ≥0.35×max 的连续段；段内若出现显著谷底（<0.90×段内峰值）
+// 再切分——这样才能把真正分开的黄双线保留成两条，而不是并成一条。
+function chromaRidges(data: ImageData, width: number, height: number) {
+  const bytes = data.data;
+  const y0 = Math.floor(height * 0.12);
+  const y1 = Math.ceil(height * 0.88);
+  const chroma = new Array<number>(width).fill(0);
+  for (let x = 0; x < width; x += 1) {
+    let sum = 0;
+    let count = 0;
+    for (let y = y0; y < y1; y += 2) {
+      const index = (y * width + x) * 4;
+      const r = bytes[index];
+      const g = bytes[index + 1];
+      const b = bytes[index + 2];
+      const bright = Math.max(r, g, b);
+      if (bright < 115) continue;
+      sum += (bright - Math.min(r, g, b)) / 255;
+      count += 1;
+    }
+    chroma[x] = count ? sum / count : 0;
+  }
+  const radius = Math.max(8, Math.round(width * 0.035));
+  const excess = new Array<number>(width).fill(0);
+  let top = 0;
+  for (let x = 0; x < width; x += 1) {
+    let low = Infinity;
+    for (let k = Math.max(0, x - radius); k <= Math.min(width - 1, x + radius); k += 1) {
+      low = Math.min(low, chroma[k]);
+    }
+    excess[x] = Number.isFinite(low) ? Math.max(0, chroma[x] - low) : 0;
+    if (excess[x] > top) top = excess[x];
+  }
+  const rel = excess.map((value) => (top > 0 ? value / top : 0));
+  const ranges: [number, number][] = [];
+  const build = (from: number, to: number): void => {
+    const segments: [number, number][] = [];
+    let start: number | null = null;
+    for (let i = from; i < to; i += 1) {
+      if (rel[i] >= 0.35) {
+        if (start === null) start = i;
+      } else if (start !== null) {
+        segments.push([start, i]);
+        start = null;
+      }
+    }
+    if (start !== null) segments.push([start, to]);
+    for (const [s, e] of segments) {
+      if (e - s < 3) {
+        ranges.push([s, e]);
+        continue;
+      }
+      let highest = -1;
+      let lowest = Infinity;
+      let lowestAt = -1;
+      for (let i = s; i < e; i += 1) {
+        if (rel[i] > highest) highest = rel[i];
+      }
+      for (let i = s + 1; i < e - 1; i += 1) {
+        if (rel[i] < lowest) { lowest = rel[i]; lowestAt = i; }
+      }
+      if (lowestAt > s && lowestAt < e - 1 && lowest < 0.9 * highest) {
+        build(s, lowestAt);
+        build(lowestAt, e);
+      } else {
+        ranges.push([s, e]);
+      }
+    }
+  };
+  build(0, width);
+  const group = new Int32Array(width).fill(-1);
+  ranges.forEach(([s, e], index) => {
+    for (let i = s; i < e; i += 1) {
+      if (group[i] < 0) group[i] = index;
+    }
+  });
+  return group;
+}
+
 function detectPeaks(data: ImageData, width: number, height: number, options: { prominence: number; minDistance: number }) {
   const profile = extractProfile(data.data, width, height);
   const found: DetectedPeak[] = [];
@@ -335,9 +448,45 @@ function detectPeaks(data: ImageData, width: number, height: number, options: { 
       found.push(describePeak(x, score + 0.2, data, width, height, family));
     }
   }
-  const ranked = found.filter((peak) => peak.height >= 0.015).sort((a, b) => b.height - a.height);
+  const verdict = new Map<number, boolean>();
+  const plausible = (x: number) => {
+    const key = Math.round(x);
+    const cached = verdict.get(key);
+    if (cached !== undefined) return cached;
+    const ok = hasFieldSupport(data, width, height, key);
+    verdict.set(key, ok);
+    return ok;
+  };
+  const ridges = chromaRidges(data, width, height);
+  const ridgeId = (x: number) => {
+    const key = Math.round(x);
+    return key >= 0 && key < width ? ridges[key] : -1;
+  };
+  const candidates = found.filter(
+    (peak) => peak.height >= 0.015 && plausible(peak.x) && ridgeId(peak.x) >= 0,
+  );
+  const topHeight = candidates.reduce((max, peak) => Math.max(max, peak.height), 0);
+  const qualified = candidates
+    // 饱和度门槛剔除叉丝刻度等灰色结构（实测真谱线 0.20+，叉丝 0.11–0.13）
+    // 相对强度门槛剔除弱尾峰（实测真谱线 ≥0.80·max，弱尾 ≤0.30·max）
+    .filter((peak) => peak.saturation >= 0.16 && peak.height >= topHeight * 0.30);
+  // 同一条谱线常被多个检测器重复报出（亮度通道 + 四个颜色通道），按足迹分组只留最强的一个
+  const strongestOfRidge = new Map<number, DetectedPeak>();
+  for (const peak of qualified) {
+    const id = ridgeId(peak.x);
+    const current = strongestOfRidge.get(id);
+    if (!current || peak.height > current.height) strongestOfRidge.set(id, peak);
+  }
+  const ranked = [...strongestOfRidge.values()].sort((a, b) => b.height - a.height);
   const kept: DetectedPeak[] = [];
   for (const peak of ranked) {
+    // 肩峰抑制：贴近强峰、且强度只有其一半以下的候选几乎都是主峰的不对称拖尾。
+    // 真黄双线两条强度相当（实测比值 0.94）不会被误并。
+    const shoulder = kept.some((other) =>
+      Math.abs(other.x - peak.x) < Math.max(6, options.minDistance * 3)
+      && peak.height < other.height * 0.5,
+    );
+    if (shoulder) continue;
     if (kept.every((other) => Math.abs(other.x - peak.x) >= minSeparation(peak, other, options.minDistance))) kept.push(peak);
     if (kept.length >= 18) break;
   }
@@ -497,7 +646,9 @@ function matchBySearch(peaks: DetectedPeak[], dUm: number, width: number): Match
       }
     }
     const candidate: MatchSearchResult | null = best;
-    if (candidate && count >= 4 && candidate.rmseValue <= 6) return candidate;
+    // 只有“多线拟合确实优秀”才提前收工；rmse 只是勉强及格时必须继续试更少的线，
+    // 否则会停在一个靠增加线条数硬凑出来的劣解上。
+    if (candidate && count >= 4 && candidate.rmseValue <= 2.5) return candidate;
   }
   return best;
 }

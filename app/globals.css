@@ -1074,7 +1074,8 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 .analysis-demo .card-title .status-pill { margin-left: auto; }
 .analysis-demo .field { display: grid; gap: 8px; margin-bottom: 16px; }
 .analysis-demo .field span { color: #405a72; font-size: 14px; font-weight: 650; }
-.analysis-demo .field input {
+.analysis-demo .field input,
+.analysis-demo .field select {
   width: 100%;
   border: 1px solid var(--line-strong);
   border-radius: 9px;
@@ -1083,9 +1084,14 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
   color: #17334d;
   outline: none;
 }
-.analysis-demo .field input:focus {
+.analysis-demo .field input:focus,
+.analysis-demo .field select:focus {
   border-color: #4b99e8;
   box-shadow: 0 0 0 3px #1684ee16;
+}
+.analysis-demo .field select {
+  min-height: 44px;
+  cursor: pointer;
 }
 .analysis-demo .field input[type="range"] {
   padding: 0;
@@ -1232,14 +1238,57 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 }
 .analysis-demo .marker {
   position: absolute;
-  width: 2px;
-  background: var(--marker-color);
-  transform: translateX(-50%);
-  box-shadow: 0 0 16px var(--marker-color);
+  width: 0 !important;
+  height: auto;
+  min-height: 40px;
   pointer-events: none;
+  z-index: 6;
+  overflow: visible;
+  display: block;
 }
-.analysis-demo .marker.manual { width: 3px; }
-.analysis-demo .marker.candidate { width: 2px; opacity: .75; }
+.analysis-demo .marker.manual,
+.analysis-demo .marker.candidate,
+.analysis-demo .marker.line {
+  width: 0 !important;
+}
+/* 竖直谱线：纯同色实线 + 同色外发光（线体不掺白，保持高饱和） */
+.analysis-demo .marker-core {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--marker-width, 3px);
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--marker-color, #22d3ee);
+  border: 1px solid var(--marker-color, #22d3ee);
+  box-shadow:
+    0 0 6px var(--marker-color, #22d3ee),
+    0 0 16px var(--marker-color, #22d3ee),
+    0 0 34px color-mix(in srgb, var(--marker-color, #22d3ee) 60%, transparent);
+  opacity: 1;
+  visibility: visible;
+  display: block;
+}
+/* 标定后的谱线最突出，手动标定点次之，候选峰弱化以免抢视线 */
+.analysis-demo .marker.line { z-index: 8; }
+.analysis-demo .marker.line .marker-core { --marker-width: 4px; }
+.analysis-demo .marker.manual { z-index: 9; }
+.analysis-demo .marker.manual .marker-core { --marker-width: 3px; }
+.analysis-demo .marker.candidate { z-index: 5; }
+.analysis-demo .marker.candidate .marker-core {
+  --marker-width: 2px;
+  opacity: .5;
+  background-image: repeating-linear-gradient(180deg, transparent 0 7px, #030812bf 7px 13px);
+  box-shadow:
+    0 0 6px var(--marker-color, #22d3ee),
+    0 0 16px var(--marker-color, #22d3ee);
+}
+.analysis-demo .marker-tag,
+.analysis-demo .marker-dot,
+.analysis-demo .marker-layer {
+  display: none !important;
+}
 .analysis-demo .manual-panel {
   margin-top: 12px;
   padding: 14px;
