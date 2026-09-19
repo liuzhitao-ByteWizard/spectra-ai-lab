@@ -70,24 +70,78 @@ type ScopeLineStyle = CSSProperties & {
 
 const MEASUREMENT_SESSION_KEY = "spectra-virtual-spectrometer-session-v1";
 
-function readMeasurementSession() {
-  if (typeof window === "undefined") return { zeroReference: null as ZeroReference | null, records: [] as Reading[] };
+type MeasurementSession = {
+  lightSource: LightSourceId;
+  lampOn: boolean;
+  linesPerMm: number;
+  slitWidth: number;
+  collimatorFocus: number;
+  focus: number;
+  stageAngle: number;
+  telescopeAngle: number;
+  showWeak: boolean;
+  showRays: boolean;
+  observationOrder: DiffractionOrder;
+  selectedWavelength: number;
+  zeroReference: ZeroReference | null;
+  records: Reading[];
+};
+
+const DEFAULT_MEASUREMENT_SESSION: MeasurementSession = {
+  lightSource: "mercury",
+  lampOn: true,
+  linesPerMm: 300,
+  slitWidth: .36,
+  collimatorFocus: .86,
+  focus: .86,
+  stageAngle: 0,
+  telescopeAngle: 0,
+  showWeak: false,
+  showRays: true,
+  observationOrder: 1,
+  selectedWavelength: 435.84,
+  zeroReference: null,
+  records: [],
+};
+
+function sessionNumber(value: unknown, fallback: number, min: number, max: number) {
+  return typeof value === "number" && Number.isFinite(value) ? clamp(value, min, max) : fallback;
+}
+
+function readMeasurementSession(): MeasurementSession {
+  if (typeof window === "undefined") return DEFAULT_MEASUREMENT_SESSION;
   try {
-    const parsed = JSON.parse(sessionStorage.getItem(MEASUREMENT_SESSION_KEY) || "{}") as { zeroReference?: unknown; records?: unknown };
+    const parsed = JSON.parse(sessionStorage.getItem(MEASUREMENT_SESSION_KEY) || "{}") as Record<string, unknown>;
+    const source = typeof parsed.lightSource === "string" && parsed.lightSource in LIGHT_SOURCES ? parsed.lightSource as LightSourceId : DEFAULT_MEASUREMENT_SESSION.lightSource;
     const zeroReference = parsed.zeroReference && typeof parsed.zeroReference === "object" ? parsed.zeroReference as ZeroReference : null;
     const records = Array.isArray(parsed.records)
       ? parsed.records.filter((record): record is Reading => Boolean(record) && typeof record === "object" && typeof (record as Reading).id === "string" && typeof (record as Reading).wavelengthNm === "number")
       : [];
-    return { zeroReference, records };
+    return {
+      lightSource: source,
+      lampOn: typeof parsed.lampOn === "boolean" ? parsed.lampOn : DEFAULT_MEASUREMENT_SESSION.lampOn,
+      linesPerMm: sessionNumber(parsed.linesPerMm, DEFAULT_MEASUREMENT_SESSION.linesPerMm, 1, 5000),
+      slitWidth: sessionNumber(parsed.slitWidth, DEFAULT_MEASUREMENT_SESSION.slitWidth, .12, .82),
+      collimatorFocus: sessionNumber(parsed.collimatorFocus, DEFAULT_MEASUREMENT_SESSION.collimatorFocus, .3, 1),
+      focus: sessionNumber(parsed.focus, DEFAULT_MEASUREMENT_SESSION.focus, .3, 1),
+      stageAngle: sessionNumber(parsed.stageAngle, DEFAULT_MEASUREMENT_SESSION.stageAngle, -12, 12),
+      telescopeAngle: sessionNumber(parsed.telescopeAngle, DEFAULT_MEASUREMENT_SESSION.telescopeAngle, -62, 62),
+      showWeak: typeof parsed.showWeak === "boolean" ? parsed.showWeak : DEFAULT_MEASUREMENT_SESSION.showWeak,
+      showRays: typeof parsed.showRays === "boolean" ? parsed.showRays : DEFAULT_MEASUREMENT_SESSION.showRays,
+      observationOrder: parsed.observationOrder === -1 ? -1 : 1,
+      selectedWavelength: sessionNumber(parsed.selectedWavelength, DEFAULT_MEASUREMENT_SESSION.selectedWavelength, 300, 900),
+      zeroReference,
+      records,
+    };
   } catch {
-    return { zeroReference: null as ZeroReference | null, records: [] as Reading[] };
+    return DEFAULT_MEASUREMENT_SESSION;
   }
 }
 
-function writeMeasurementSession(zeroReference: ZeroReference | null, records: Reading[]) {
+function writeMeasurementSession(session: MeasurementSession) {
   if (typeof window === "undefined") return;
   try {
-    sessionStorage.setItem(MEASUREMENT_SESSION_KEY, JSON.stringify({ zeroReference, records }));
+    sessionStorage.setItem(MEASUREMENT_SESSION_KEY, JSON.stringify(session));
   } catch {
     // Session persistence is best-effort; measurements remain in React state.
   }
@@ -276,21 +330,21 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   const hostRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<SceneRuntime | null>(null);
   const dragRef = useRef<{ active: boolean; x: number }>({ active: false, x: 0 });
+  const initialMeasurementSession = useMemo(() => readMeasurementSession(), []);
   const [mouseTool, setMouseTool] = useState<MouseTool>("view");
   const [cameraView, setCameraView] = useState<CameraView>("side");
-  const [lampOn, setLampOn] = useState(true);
-  const [lightSource, setLightSource] = useState<LightSourceId>("mercury");
-  const [linesPerMm, setLinesPerMm] = useState(300);
-  const [slitWidth, setSlitWidth] = useState(.36);
-  const [collimatorFocus, setCollimatorFocus] = useState(.86);
-  const [focus, setFocus] = useState(.86);
-  const [stageAngle, setStageAngle] = useState(0);
-  const [telescopeAngle, setTelescopeAngle] = useState(0);
-  const [showWeak, setShowWeak] = useState(false);
-  const [showRays, setShowRays] = useState(true);
-  const [observationOrder, setObservationOrder] = useState<DiffractionOrder>(1);
-  const [selectedWavelength, setSelectedWavelength] = useState(435.84);
-  const initialMeasurementSession = useMemo(() => readMeasurementSession(), []);
+  const [lampOn, setLampOn] = useState(initialMeasurementSession.lampOn);
+  const [lightSource, setLightSource] = useState<LightSourceId>(initialMeasurementSession.lightSource);
+  const [linesPerMm, setLinesPerMm] = useState(initialMeasurementSession.linesPerMm);
+  const [slitWidth, setSlitWidth] = useState(initialMeasurementSession.slitWidth);
+  const [collimatorFocus, setCollimatorFocus] = useState(initialMeasurementSession.collimatorFocus);
+  const [focus, setFocus] = useState(initialMeasurementSession.focus);
+  const [stageAngle, setStageAngle] = useState(initialMeasurementSession.stageAngle);
+  const [telescopeAngle, setTelescopeAngle] = useState(initialMeasurementSession.telescopeAngle);
+  const [showWeak, setShowWeak] = useState(initialMeasurementSession.showWeak);
+  const [showRays, setShowRays] = useState(initialMeasurementSession.showRays);
+  const [observationOrder, setObservationOrder] = useState<DiffractionOrder>(initialMeasurementSession.observationOrder);
+  const [selectedWavelength, setSelectedWavelength] = useState(initialMeasurementSession.selectedWavelength);
   const [zeroReference, setZeroReference] = useState<ZeroReference | null>(initialMeasurementSession.zeroReference);
   const [records, setRecords] = useState<Reading[]>(initialMeasurementSession.records);
   const [lastMessage, setLastMessage] = useState("先检查狭缝与调焦，再让光栅法线回到 0°。");
@@ -915,8 +969,23 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   };
 
   useEffect(() => {
-    writeMeasurementSession(zeroReference, records);
-  }, [zeroReference, records]);
+    writeMeasurementSession({
+      lightSource,
+      lampOn,
+      linesPerMm,
+      slitWidth,
+      collimatorFocus,
+      focus,
+      stageAngle,
+      telescopeAngle,
+      showWeak,
+      showRays,
+      observationOrder,
+      selectedWavelength,
+      zeroReference,
+      records,
+    });
+  }, [lightSource, lampOn, linesPerMm, slitWidth, collimatorFocus, focus, stageAngle, telescopeAngle, showWeak, showRays, observationOrder, selectedWavelength, zeroReference, records]);
 
   const resetMeasurement = (message: string) => {
     clearMeasurementSession();
