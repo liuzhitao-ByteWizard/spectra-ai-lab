@@ -4,9 +4,9 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExterna
 import dynamic from "next/dynamic";
 import {
   Aperture, ArrowLeft, ArrowRight, BarChart3, BookOpen, Bot, Camera,
-  CheckCircle2, ChevronRight, CircleAlert, CircleHelp, ClipboardCheck, Clock3,
+  CheckCircle2, ChevronRight, CircleAlert, ClipboardCheck, Clock3,
   Download, ExternalLink, FileText, FlaskConical, History, Home,
-  ImagePlus, LoaderCircle, LogIn, LogOut, MessageCircle, Microscope, Play,
+  ImagePlus, LoaderCircle, LogIn, MessageCircle, Microscope, Play,
   RotateCcw, Save, ScanLine, Send, Sigma, SlidersHorizontal, Target, Telescope,
   Upload, Users, Waves,
 } from "lucide-react";
@@ -341,7 +341,7 @@ async function analyzeImageFile(file: File): Promise<SpectrumSource> {
   };
 }
 
-function AppHeader({ active, onChange, authenticated, authHref, authLabel, viewerName }: { active: ModuleId; onChange: (id: ModuleId) => void; authenticated: boolean; authHref: string | null; authLabel: string; viewerName: string | null }) {
+function AppHeader({ active, onChange }: { active: ModuleId; onChange: (id: ModuleId) => void }) {
   return (
     <header className="topbar">
       <button className="brand" onClick={() => onChange("home")} aria-label="返回首页">
@@ -351,10 +351,7 @@ function AppHeader({ active, onChange, authenticated, authHref, authLabel, viewe
       <nav className="main-nav" aria-label="主导航">
         {navItems.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} aria-current={active === item.id ? "page" : undefined} onClick={() => onChange(item.id)}>{item.label}</button>)}
       </nav>
-      <div className="topbar-actions">
-        <button className="ghost-button" onClick={() => toast.info("主流程：虚拟预习 → 上传光谱图自动认线 → 两线自标定（求 x₁ 与 L）→ 未知线测量与 d 反演 → 云端复盘")}><CircleHelp size={17} /> 流程帮助</button>
-        {authHref ? <a className="auth-link" href={authHref} target="_top" title={viewerName ?? authLabel}>{authenticated ? <LogOut size={16} /> : <LogIn size={16} />}{authLabel}</a> : authenticated ? <span className="auth-link" title={viewerName ?? authLabel}><CheckCircle2 size={16} />{authLabel}</span> : null}
-      </div>
+      <span className="topbar-spacer" aria-hidden="true" />
     </header>
   );
 }
@@ -1841,5 +1838,5 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} authenticated={authenticated} authHref={authHref} authLabel={authLabel} viewerName={viewerName} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModuleV2 key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} authenticated={authenticated} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule authenticated={authenticated} authHref={authHref} />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
+  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModuleV2 key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} authenticated={authenticated} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule authenticated={authenticated} authHref={authHref} />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
 }
