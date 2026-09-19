@@ -400,7 +400,7 @@ const AnalysisGlassPanel = memo(function AnalysisGlassPanel() {
           <i
             key={line.wavelengthNm}
             className={`${index <= stage || (index === 4 && stage >= 3) ? "visible" : ""}${index === 3 ? " yellow-doublet-left" : ""}${index === 4 ? " yellow-doublet-right" : ""}`}
-            style={{ left: `${[13, 28, 57, 75, 81][index]}%`, backgroundColor: line.color }}
+            style={{ left: `${[13, 28, 57, 75.4, 77.2][index]}%`, backgroundColor: line.color }}
           >
             <b>{line.wavelengthNm.toFixed(2)}</b>
           </i>
