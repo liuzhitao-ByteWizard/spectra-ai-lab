@@ -1798,3 +1798,127 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
   .analysis-demo .lab-layout { grid-template-columns: 1fr; }
   .analysis-demo .experiment-card { padding: 16px; }
 }
+/* === AURA 页面感知提示气泡 === */
+.aura-hint-bubble {
+  position: fixed;
+  z-index: 92;
+  width: min(310px, calc(100vw - 32px));
+  padding: 14px 14px 12px;
+  border: 1px solid rgba(125, 151, 190, .38);
+  border-radius: 16px;
+  color: #18344f;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 16px 45px rgba(20, 45, 78, .22), 0 0 28px rgba(34, 211, 238, .1);
+  animation: aura-bubble-in .24s ease-out;
+  backdrop-filter: blur(16px);
+}
+.aura-hint-bubble::after {
+  content: "";
+  position: absolute;
+  right: 20px;
+  bottom: -7px;
+  width: 13px;
+  height: 13px;
+  border-right: 1px solid rgba(125, 151, 190, .38);
+  border-bottom: 1px solid rgba(125, 151, 190, .38);
+  background: rgba(255, 255, 255, .98);
+  transform: rotate(45deg);
+}
+@keyframes aura-bubble-in {
+  from { opacity: 0; transform: translateY(8px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.aura-hint-close {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: #6a7f95;
+  background: transparent;
+  cursor: pointer;
+}
+.aura-hint-close:hover { color: #102f4d; background: #edf3f9; }
+.aura-hint-kicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 26px 7px 0;
+  color: #6d4bd8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.aura-hint-text {
+  margin: 0;
+  color: #23425f;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.aura-hint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 11px;
+}
+.aura-hint-actions button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid #cfdcea;
+  border-radius: 9px;
+  color: #31516f;
+  background: #f8fbff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.aura-hint-actions button:hover { border-color: #a8c3e4; color: #174d87; background: #eef6ff; }
+.aura-hint-actions .aura-hint-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: transparent;
+  color: #fff;
+  background: linear-gradient(135deg, #6d4bd8, #138fc6);
+  box-shadow: 0 5px 14px rgba(60, 95, 190, .22);
+}
+.aura-hint-actions .aura-hint-primary:hover { color: #fff; background: linear-gradient(135deg, #5c3bc7, #087fb6); }
+.aura-hint-mute {
+  display: block;
+  margin-top: 7px;
+  padding: 0;
+  border: 0;
+  color: #8293a6;
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+.aura-hint-mute:hover { color: #536b84; text-decoration: underline; }
+.aura-quick-prompts {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 0;
+  overflow-x: auto;
+  background: #fff;
+  scrollbar-width: none;
+}
+.aura-quick-prompts::-webkit-scrollbar { display: none; }
+.aura-quick-prompts button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid #d7e3ef;
+  border-radius: 999px;
+  color: #48647f;
+  background: #f7faff;
+  font-size: 11px;
+  cursor: pointer;
+}
+.aura-quick-prompts button:hover { border-color: #a9c7e7; color: #17558f; background: #edf6ff; }
+@media (max-width: 540px) {
+  .aura-hint-bubble { right: 12px !important; bottom: 86px !important; width: auto; left: 12px; }
+  .aura-hint-bubble::after { right: 28px; }
+}
