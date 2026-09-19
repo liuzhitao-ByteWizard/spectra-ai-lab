@@ -40,7 +40,7 @@ import {
   type ExperimentTask, type RecordSnapshot, type SavedRecord,
 } from "@/lib/experiment-record";
 import { emptyJourney, mergeJourney, type ExperimentJourney } from "@/lib/experiment-journey";
-import { exportLocalRecordsBackup, importLocalRecordsBackup, listLocalRecords, saveLocalRecord } from "@/lib/local-records";
+import { buildRecordsCsv, exportLocalRecordsBackup, importLocalRecordsFile, listLocalRecords, saveLocalRecord } from "@/lib/local-records";
 import { buildExperimentReportHtml } from "./api/records/report-html";
 
 const VirtualSpectrometer3D = dynamic(() => import("./VirtualSpectrometer3D"), {
@@ -1481,29 +1481,43 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, finishExper
   }, [file, result, lineResiduals, hasResult, blockReason, updateJourney]);
 
   const recordSnapshot = useMemo<RecordSnapshot>(() => {
-    const resultValue = hasResult && result?.calibration ? `${result.calibration.dUm.toFixed(3)} μm` : "进行中";
+    const calibration = result?.calibration;
+    const resultValue = calibration
+      ? `x₀ ${calibration.x0Px.toFixed(1)} px · L ${calibration.effectiveLPx.toFixed(0)} px`
+      : "进行中";
     const steps: string[] = [];
     if (journey.prelab.capturedLines >= 2 && journey.prelab.dUm !== null) steps.push("虚拟预习");
     if (file) steps.push("光谱图采集与质量检查");
     if (lineResiduals.length >= 3) steps.push("谱线自动匹配与确认");
-    if (hasResult) steps.push("物理约束标定", "d 反演", "本地保存与实验复盘");
+    if (hasResult) steps.push("光栅参数设定", "物理约束标定（求解 x₀ 与 L）", "谱线预测与残差复核", "本地保存与实验复盘");
     return {
       task,
-      source: "汞灯",
-      resultLabel: "光栅常数 d",
+      source: "汞灯光谱",
+      resultLabel: "几何标定",
       resultValue,
-      quality: !hasResult ? (blockReason || "进行中") : "可报告",
+      quality: !hasResult ? (blockReason || "进行中") : result?.summary.fitQuality || "已完成",
       status: !hasResult ? "draft" : "completed",
       steps,
       diagnosis,
       payload: {
-        state: { prominence, minDistance, linesPerMm, complete: hasResult },
+        measurementType: "known-grating-spectrum-calibration",
+        state: { prominence, minDistance, linesPerMm, gratingDUm: 1000 / linesPerMm, order: 1, complete: hasResult },
         referenceMarkers: lineResiduals.map((line) => ({ wavelengthNm: line.standardNm, xRatio: line.x / Math.max(result?.summary.imageWidth || 1, 1) })),
         result: result ? { ...result } : null,
-        processing: { peaks: result?.detectedPeaks.length ?? 0, overexposed: false, sharpnessOk: Boolean(file) },
+        processing: {
+          peaks: result?.detectedPeaks.length ?? 0,
+          candidateCount: result?.processing.candidateCount ?? 0,
+          detectedCount: result?.processing.detectedCount ?? 0,
+          usableCount: result?.processing.usableCount ?? 0,
+          matchedCount: result?.processing.matchedCount ?? 0,
+          overexposed: false,
+          sharpnessOk: Boolean(file),
+          fallbackRequired: result?.processing.fallbackRequired ?? false,
+          fallbackMessage: result?.processing.fallbackMessage ?? "",
+        },
         evidence: {
-          stages: ["虚拟预习", "光谱图采集与质量检查", "谱线自动匹配与确认", "物理约束标定", "波长结果与残差复核", "本地保存与实验复盘"],
-          limitation: "浏览器端离线分析：HSV 颜色分析 → 多源融合峰值检测 → 物理约束标定。d 作为已知或软约束，不作为自由反演结论。",
+          stages: ["虚拟预习", "光谱图采集与质量检查", "谱线自动匹配与确认", "光栅参数设定", "物理约束标定（求解 x₀ 与 L）", "谱线预测与残差复核", "本地保存与实验复盘"],
+          limitation: "光栅刻线密度作为已知参数，系统通过汞灯参考谱线标定图像几何参数 x₀ 与 L，并预测各条谱线波长及残差。",
         },
       },
     };
@@ -1525,8 +1539,16 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, finishExper
           (Math.abs(1000 / lines - dUm) < Math.abs(1000 / best - dUm) ? lines : best), GRATING_LINES[0]));
       }
     }
-    setResult(null);
-    setStatus(file ? "ready" : "idle");
+    const restoredResult = record.payload.result && typeof record.payload.result === "object"
+      ? record.payload.result as CalibrationResult
+      : null;
+    if (restoredResult?.calibration) {
+      setResult(restoredResult);
+      setStatus("complete");
+    } else {
+      setResult(null);
+      setStatus(file ? "ready" : "idle");
+    }
   }, [file]);
 
   const sync = useExperimentSync({ task, enabled: Boolean(file), snapshot: recordSnapshot, pendingImagesRef, onRemoteRecord: hydrateRecord });
@@ -1750,15 +1772,7 @@ function RecordsModule() {
   }, [refresh]);
 
   const exportCsv = () => {
-    const rows = [["最后更新", "任务", "光源", "状态", "结果", "质量"], ...records.map((record) => [
-      formatChinaDateTime(record.updatedAt),
-      record.task,
-      record.source,
-      record.status === "draft" ? "进行中" : record.status === "needs_review" ? "需复核" : "已完成",
-      record.resultValue,
-      record.quality,
-    ])];
-    downloadFile("spectra-experiments.csv", rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n"), "text/csv");
+    downloadFile("spectra-experiments.csv", buildRecordsCsv(records), "text/csv");
   };
 
   const exportBackup = async () => {
@@ -1775,7 +1789,7 @@ function RecordsModule() {
   const importBackup = async (file?: File) => {
     if (!file) return;
     try {
-      const count = await importLocalRecordsBackup(file);
+      const count = await importLocalRecordsFile(file);
       await refresh();
       toast.success(`已导入 ${count} 条实验记录`);
     } catch (error) {
@@ -1798,7 +1812,7 @@ function RecordsModule() {
       action={<div className="records-actions">
         <button className="secondary-action" onClick={exportCsv} disabled={!records.length}><Download size={16} />导出 CSV</button>
         <button className="secondary-action" onClick={() => void exportBackup()} disabled={!records.length}><Download size={16} />导出备份</button>
-        <label className="secondary-action records-import"><Upload size={16} />导入备份<input ref={importInputRef} type="file" accept="application/json,.json" onChange={(event) => void importBackup(event.target.files?.[0])} /></label>
+        <label className="secondary-action records-import"><Upload size={16} />导入 CSV/备份<input ref={importInputRef} type="file" accept=".csv,.json,text/csv,application/json" onChange={(event) => void importBackup(event.target.files?.[0])} /></label>
       </div>}
     />
     <div className={`records-sync ${errorMessage ? "error" : ""}`} aria-live="polite">

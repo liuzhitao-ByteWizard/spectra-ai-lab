@@ -17,6 +17,8 @@ type StoredImage = {
 type BackupImageMap = Partial<Record<ExperimentImageSlot, string>>;
 type BackupRecord = StoredRecord & { images?: BackupImageMap };
 type BackupPayload = {
+  format: "spectra-experiment-backup";
+  system: "spectra-parameter-inversion";
   version: 1;
   exportedAt: string;
   records: BackupRecord[];
@@ -174,6 +176,8 @@ export async function exportLocalRecordsBackup() {
     backupRecords.push({ ...record, images: imageData });
   }
   const payload: BackupPayload = {
+    format: "spectra-experiment-backup",
+    system: "spectra-parameter-inversion",
     version: 1,
     exportedAt: new Date().toISOString(),
     records: backupRecords,
@@ -241,4 +245,141 @@ export async function importLocalRecordsBackup(file: File) {
   await transactionDone(transaction);
   notifyLocalRecordsChanged();
   return prepared.length;
+}
+
+
+function csvCell(value: unknown) {
+  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+}
+
+function currentRecordData(record: SavedRecord) {
+  const payload = objectValue(record.payload);
+  const state = objectValue(payload.state);
+  const result = objectValue(payload.result);
+  const calibration = objectValue(result.calibration);
+  const summary = objectValue(result.summary);
+  const processing = objectValue(payload.processing);
+  const lines = Array.isArray(result.lines) ? result.lines.map(objectValue) : [];
+  const dUm = typeof calibration.dUm === "number" ? calibration.dUm : (typeof state.gratingDUm === "number" ? state.gratingDUm : null);
+  const linesPerMm = typeof state.linesPerMm === "number" ? state.linesPerMm : (dUm ? 1000 / dUm : null);
+  return { state, result, calibration, summary, processing, lines, dUm, linesPerMm };
+}
+
+export function buildRecordsCsv(records: SavedRecord[]) {
+  const headers = [
+    "记录编号", "创建时间", "最后更新", "光源", "状态", "质量", "结果标签", "结果值",
+    "光栅线密度(线/mm)", "光栅常数d(μm)", "x0(px)", "L(px)", "拟合RMSE(nm)", "最大残差(nm)",
+    "匹配谱线数", "候选峰数", "图像宽度(px)", "图像高度(px)", "诊断意见", "谱线明细",
+  ];
+  const rows = records.map((record) => {
+    const data = currentRecordData(record);
+    const lineDetails = data.lines.map((line) => ({
+      standardNm: line.standardNm ?? null,
+      predictedNm: line.predictedNm ?? null,
+      xPx: line.x ?? null,
+      residualNm: line.residualNm ?? null,
+      status: line.status ?? "",
+    }));
+    const maxResidual = typeof data.summary.maxAbsResidualNm === "number" ? data.summary.maxAbsResidualNm : null;
+    const rmse = typeof data.calibration.rmseNm === "number" ? data.calibration.rmseNm : (typeof data.summary.rmseNm === "number" ? data.summary.rmseNm : null);
+    return [
+      record.id, new Date(record.createdAt).toISOString(), new Date(record.updatedAt).toISOString(), record.source,
+      record.status === "draft" ? "进行中" : record.status === "needs_review" ? "需复核" : "已完成",
+      record.quality, record.resultLabel, record.resultValue, data.linesPerMm, data.dUm, data.calibration.x0Px,
+      data.calibration.effectiveLPx, rmse, maxResidual, data.lines.length, data.processing.candidateCount,
+      data.summary.imageWidth, data.summary.imageHeight, record.diagnosis, JSON.stringify(lineDetails),
+    ];
+  });
+  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quoted) {
+      if (char === '"' && text[index + 1] === '"') { field += '"'; index += 1; }
+      else if (char === '"') quoted = false;
+      else field += char;
+    } else if (char === '"') quoted = true;
+    else if (char === ",") { row.push(field); field = ""; }
+    else if (char === "\n") { row.push(field.replace(/\r$/, "")); rows.push(row); row = []; field = ""; }
+    else field += char;
+  }
+  if (field.length || row.length) { row.push(field.replace(/\r$/, "")); rows.push(row); }
+  return rows;
+}
+
+function numberFromText(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function importLocalRecordsCsv(file: File) {
+  const rows = parseCsv((await file.text()).replace(/^\uFEFF/, ""));
+  if (rows.length < 2) throw new Error("CSV 文件没有可导入的数据");
+  const headers = rows[0].map((item) => item.trim());
+  const indexOf = (name: string) => headers.indexOf(name);
+  const prepared: StoredRecord[] = [];
+  for (const row of rows.slice(1)) {
+    const value = (name: string) => indexOf(name) >= 0 ? row[indexOf(name)] ?? "" : "";
+    const id = value("记录编号") || crypto.randomUUID();
+    const createdAt = value("创建时间") || new Date().toISOString();
+    const updatedAt = value("最后更新") || createdAt;
+    const dUm = numberFromText(value("光栅常数d(μm)"));
+    const linesPerMm = numberFromText(value("光栅线密度(线/mm)")) ?? (dUm ? 1000 / dUm : null);
+    const x0Px = numberFromText(value("x0(px)"));
+    const effectiveLPx = numberFromText(value("L(px)"));
+    const rmseNm = numberFromText(value("拟合RMSE(nm)"));
+    const maxResidualNm = numberFromText(value("最大残差(nm)"));
+    const imageWidth = numberFromText(value("图像宽度(px)")) ?? 0;
+    const imageHeight = numberFromText(value("图像高度(px)")) ?? 0;
+    let lineDetails: Array<Record<string, unknown>> = [];
+    try { const parsed = JSON.parse(value("谱线明细") || "[]") as unknown; if (Array.isArray(parsed)) lineDetails = parsed.map(objectValue); } catch { lineDetails = []; }
+    const lines = lineDetails.map((line) => ({
+      id: `${id}-${crypto.randomUUID()}`,
+      x: numberFromText(line.xPx) ?? 0,
+      height: 1,
+      colorName: "谱线",
+      color: "#2563eb",
+      matchKey: "",
+      matchLabel: "谱线",
+      standardNm: numberFromText(line.standardNm) ?? 0,
+      predictedNm: numberFromText(line.predictedNm) ?? 0,
+      residualNm: numberFromText(line.residualNm) ?? 0,
+      status: typeof line.status === "string" ? line.status : "未复核",
+      statusKey: "ok" as const,
+      order: 1,
+    }));
+    const statusText = value("状态");
+    const status = statusText === "已完成" ? "completed" : statusText === "需复核" ? "needs_review" : "draft";
+    const result = x0Px !== null || effectiveLPx !== null || lines.length ? {
+      summary: { mode: "calibration", imageWidth, imageHeight, detectedCount: lines.length, usableCount: lines.length, matchedCount: lines.length, rmseNm, maxAbsResidualNm: maxResidualNm, fitQuality: value("质量"), dUm, manualCalibration: false, offlineFallback: false },
+      calibration: x0Px !== null && effectiveLPx !== null && dUm !== null ? { dUm, x0Px, effectiveLPx, rmseNm: rmseNm ?? 0, sourceLineCount: lines.length, validRangeNm: [0, 0], createdAt: new Date(updatedAt).toISOString() } : undefined,
+      lines, profile: [], annotations: [], detectedPeaks: [], processing: { candidateCount: numberFromText(value("候选峰数")) ?? 0, detectedCount: lines.length, usableCount: lines.length, matchedCount: lines.length, manual: false, fallbackRequired: false, fallbackMessage: "", steps: [] },
+    } : null;
+    prepared.push({
+      id, createdAt, updatedAt, version: 1, task: "A", source: value("光源") || "汞灯光谱",
+      resultLabel: value("结果标签") || "几何标定", resultValue: value("结果值") || "已导入", quality: value("质量") || "已导入", status,
+      steps: ["CSV 导入", "本地记录恢复"], diagnosis: value("诊断意见"), payload: { measurementType: "known-grating-spectrum-calibration", state: { linesPerMm, gratingDUm: dUm, order: 1, complete: status === "completed" }, result },
+    });
+  }
+  const database = await openDatabase();
+  const transaction = database.transaction(RECORDS_STORE, "readwrite");
+  const store = transaction.objectStore(RECORDS_STORE);
+  for (const record of prepared) store.put(record);
+  await transactionDone(transaction);
+  notifyLocalRecordsChanged();
+  return prepared.length;
+}
+
+export async function importLocalRecordsFile(file: File) {
+  if (file.name.toLowerCase().endsWith(".csv") || file.type.includes("csv")) return importLocalRecordsCsv(file);
+  return importLocalRecordsBackup(file);
 }
