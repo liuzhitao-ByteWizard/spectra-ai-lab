@@ -73,8 +73,8 @@ const MERCURY_LINES: SpectrometerLine[] = [
   { ...SPECTRAL_LIBRARY.mercury[1], label: "蓝线" },
   { wavelengthNm: 491.6, color: "#2cd8d1", family: "blue", intensity: .22, label: "青色弱线", weak: true },
   { ...SPECTRAL_LIBRARY.mercury[2], label: "绿线" },
-  { ...SPECTRAL_LIBRARY.mercury[3], label: "黄线 1" },
-  { ...SPECTRAL_LIBRARY.mercury[4], label: "黄线 2" },
+  { ...SPECTRAL_LIBRARY.mercury[3], color: "#f2c200", label: "黄线 1" },
+  { ...SPECTRAL_LIBRARY.mercury[4], color: "#ffe76a", label: "黄线 2" },
 ];
 
 const SODIUM_LINES: SpectrometerLine[] = SPECTRAL_LIBRARY.sodium.map((line, index) => ({
@@ -282,6 +282,22 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   );
   const selectedLine = displayedLines.find((line) => line.wavelengthNm === selectedWavelength) ?? displayedLines[0];
   const targetAngle = selectedLine ? calculateDiffractionAngle(selectedLine.wavelengthNm, linesPerMm, stageAngle, activeObservationOrder) : null;
+  const visualAngleForLine = useCallback((line: SpectrometerLine, order: DiffractionOrder) => {
+    const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle, order);
+    const yellow1 = Math.abs(line.wavelengthNm - 576.96) < .05;
+    const yellow2 = Math.abs(line.wavelengthNm - 579.07) < .05;
+    if (angle === null || (!yellow1 && !yellow2)) return angle;
+    const selectedYellow = displayedLines.find((candidate) =>
+      Math.abs(candidate.wavelengthNm - selectedWavelength) < .05
+      && (Math.abs(candidate.wavelengthNm - 576.96) < .05 || Math.abs(candidate.wavelengthNm - 579.07) < .05));
+    const baseAngle = selectedYellow
+      ? calculateDiffractionAngle(selectedYellow.wavelengthNm, linesPerMm, stageAngle, order)
+      : calculateDiffractionAngle((576.96 + 579.07) / 2, linesPerMm, stageAngle, order);
+    if (baseAngle === null || Math.abs(angle - baseAngle) < 1e-6) return angle;
+    // The real doublet separation is only about 0.037 degrees at 300 lines/mm.
+    // Keep the selected line on its physical angle and exaggerate only the companion line for visibility.
+    return baseAngle + (angle - baseAngle) * 8;
+  }, [displayedLines, linesPerMm, selectedWavelength, stageAngle]);
   const observationLabel = activeObservationOrder === 1 ? "右侧 +1 级" : "左侧 −1 级";
   const rawReadings = useMemo(() => makeVernierReadings(telescopeAngle), [telescopeAngle]);
   const alignmentTolerance = clamp(.035 + (1 - focus) * .26 + (1 - collimatorFocus) * .24 + slitOptics.broadening * .2, .045, .28);
@@ -803,16 +819,18 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const visibleOrders: DiffractionOrder[] = [-1, 1];
     visibleOrders.forEach((order) => {
       displayedLines.forEach((line) => {
-        const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle, order);
+        const angle = visualAngleForLine(line, order);
         if (angle === null) return;
         const end = getRayEnd(angle);
-        const opacity = line.intensity * intensityFactor * (line.weak ? .48 : 1) * (sourceProfile.continuous ? .54 : 1);
-        const material = new THREE.MeshBasicMaterial({ color: line.color, transparent: true, opacity });
-        const rayRadius = slitOptics.outputRadius + (sourceProfile.continuous ? .0025 : .0015);
+        const opacity = clamp(line.intensity * intensityFactor * (line.weak ? .48 : 1) * (sourceProfile.continuous ? .54 : 1) * 1.25 + .08, .18, .96);
+        const material = new THREE.MeshBasicMaterial({ color: line.color, transparent: true, opacity, toneMapped: false });
+        const rayRadius = sourceProfile.continuous
+          ? slitOptics.outputRadius + .0025
+          : clamp(.0048 + slitOptics.outputRadius * .12, .0052, .0065);
         addCylinderBetween(runtime.beams, gratingCenter, end, rayRadius, material);
       });
     });
-  }, [stageAngle, telescopeAxisAngle, lampOn, showRays, displayedLines, linesPerMm, collimatorFocus, focus, sourceProfile, slitOptics]);
+  }, [stageAngle, telescopeAxisAngle, lampOn, showRays, displayedLines, linesPerMm, collimatorFocus, focus, sourceProfile, slitOptics, visualAngleForLine]);
 
   const setSceneView = useCallback((view: CameraView) => {
     const runtime = runtimeRef.current;
@@ -972,8 +990,8 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     background: color,
     color,
     opacity,
-    "--scope-line-width": `${slitOptics.scopeLineWidth + (target ? .9 : 0)}px`,
-    "--scope-line-blur": `${slitOptics.scopeLineBlur}px`,
+    "--scope-line-width": `${(sourceProfile.continuous ? slitOptics.scopeLineWidth : Math.min(slitOptics.scopeLineWidth, 1.45)) + (target ? .4 : 0)}px`,
+    "--scope-line-blur": `${sourceProfile.continuous ? slitOptics.scopeLineBlur : Math.min(slitOptics.scopeLineBlur, .45)}px`,
   });
   return (
     <div className="virtual-lab-page">
@@ -1045,7 +1063,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
               <span className="scope-crosshair horizontal" /><span className="scope-crosshair vertical" />
               {lampOn && zeroInScope && <i className="scope-zero" style={makeScopeLineStyle(0, telescopeAxisAngle, "#d9edff", .16 + slitOptics.throughput * .28)} />}
               {lampOn && directedObservationOrder !== null && displayedLines.map((line) => {
-                const angle = calculateDiffractionAngle(line.wavelengthNm, linesPerMm, stageAngle, activeObservationOrder);
+                const angle = visualAngleForLine(line, activeObservationOrder);
                 if (angle === null || !isRayInScope(angle, telescopeAxisAngle)) return null;
                 const isTarget = line.wavelengthNm === selectedLine?.wavelengthNm;
                 const opacity = line.intensity * (line.weak ? .55 : 1) * (.28 + slitOptics.throughput * .72) * (sourceProfile.continuous ? .76 : 1);
