@@ -68,6 +68,36 @@ type ScopeLineStyle = CSSProperties & {
   "--scope-line-blur": string;
 };
 
+const MEASUREMENT_SESSION_KEY = "spectra-virtual-spectrometer-session-v1";
+
+function readMeasurementSession() {
+  if (typeof window === "undefined") return { zeroReference: null as ZeroReference | null, records: [] as Reading[] };
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(MEASUREMENT_SESSION_KEY) || "{}") as { zeroReference?: unknown; records?: unknown };
+    const zeroReference = parsed.zeroReference && typeof parsed.zeroReference === "object" ? parsed.zeroReference as ZeroReference : null;
+    const records = Array.isArray(parsed.records)
+      ? parsed.records.filter((record): record is Reading => Boolean(record) && typeof record === "object" && typeof (record as Reading).id === "string" && typeof (record as Reading).wavelengthNm === "number")
+      : [];
+    return { zeroReference, records };
+  } catch {
+    return { zeroReference: null as ZeroReference | null, records: [] as Reading[] };
+  }
+}
+
+function writeMeasurementSession(zeroReference: ZeroReference | null, records: Reading[]) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(MEASUREMENT_SESSION_KEY, JSON.stringify({ zeroReference, records }));
+  } catch {
+    // Session persistence is best-effort; measurements remain in React state.
+  }
+}
+
+function clearMeasurementSession() {
+  if (typeof window === "undefined") return;
+  try { sessionStorage.removeItem(MEASUREMENT_SESSION_KEY); } catch { /* no-op */ }
+}
+
 const MERCURY_LINES: SpectrometerLine[] = [
   { ...SPECTRAL_LIBRARY.mercury[0], label: "紫线" },
   { ...SPECTRAL_LIBRARY.mercury[1], label: "蓝线" },
@@ -260,8 +290,9 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
   const [showRays, setShowRays] = useState(true);
   const [observationOrder, setObservationOrder] = useState<DiffractionOrder>(1);
   const [selectedWavelength, setSelectedWavelength] = useState(435.84);
-  const [zeroReference, setZeroReference] = useState<ZeroReference | null>(null);
-  const [records, setRecords] = useState<Reading[]>([]);
+  const initialMeasurementSession = useMemo(() => readMeasurementSession(), []);
+  const [zeroReference, setZeroReference] = useState<ZeroReference | null>(initialMeasurementSession.zeroReference);
+  const [records, setRecords] = useState<Reading[]>(initialMeasurementSession.records);
   const [lastMessage, setLastMessage] = useState("先检查狭缝与调焦，再让光栅法线回到 0°。");
 
   const sourceProfile = LIGHT_SOURCES[lightSource];
@@ -883,7 +914,12 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     if (runtime) runtime.controls.enabled = true;
   };
 
+  useEffect(() => {
+    writeMeasurementSession(zeroReference, records);
+  }, [zeroReference, records]);
+
   const resetMeasurement = (message: string) => {
+    clearMeasurementSession();
     setZeroReference(null);
     setRecords([]);
     setLastMessage(message);
