@@ -45,3 +45,23 @@ export const aiUsageDaily = sqliteTable(
     index("idx_ai_usage_daily_day").on(table.day),
   ],
 );
+
+export const feedbackMessages = sqliteTable(
+  "feedback_messages",
+  {
+    id: text("id").primaryKey(),
+    category: text("category").notNull().default("其他"),
+    message: text("message").notNull(),
+    contact: text("contact").notNull().default(""),
+    page: text("page").notNull().default(""),
+    userId: text("user_id"),
+    userEmail: text("user_email"),
+    fingerprint: text("fingerprint").notNull(),
+    userAgent: text("user_agent").notNull().default(""),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("idx_feedback_created_at").on(table.createdAt),
+    index("idx_feedback_fingerprint_created_at").on(table.fingerprint, table.createdAt),
+  ],
+);

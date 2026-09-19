@@ -343,6 +343,91 @@ async function analyzeImageFile(file: File): Promise<SpectrumSource> {
   };
 }
 
+function FeedbackBox({ active }: { active: ModuleId }) {
+  const [open, setOpen] = useState(false);
+  const [category, setCategory] = useState("功能建议");
+  const [message, setMessage] = useState("");
+  const [contact, setContact] = useState("");
+  const [website, setWebsite] = useState("");
+  const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && status !== "submitting") setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, status]);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmed = message.trim();
+    if (trimmed.length < 5) {
+      setStatus("error");
+      setErrorMessage("请至少输入 5 个字符的建议内容。");
+      return;
+    }
+    setStatus("submitting");
+    setErrorMessage("");
+    try {
+      const response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          message: trimmed,
+          contact: contact.trim(),
+          page: navItems.find((item) => item.id === active)?.label ?? active,
+          website,
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(data.error || "留言提交失败，请稍后重试。");
+      setStatus("success");
+      setMessage("");
+      setContact("");
+      setWebsite("");
+    } catch (error) {
+      setStatus("error");
+      setErrorMessage(error instanceof Error ? error.message : "留言提交失败，请稍后重试。");
+    }
+  };
+
+  return <>
+    <button className={`topbar-feedback ${open ? "active" : ""}`} onClick={() => { setOpen(true); setStatus("idle"); }} title="向网站提交建议或问题反馈">
+      <MessageCircle size={15} />
+      <span>留言箱</span>
+    </button>
+    {open && <div className="feedback-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && status !== "submitting") setOpen(false); }}>
+      <section className="feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-title">
+        <header className="feedback-head">
+          <div><p className="eyebrow">SPECTRA · 用户反馈</p><h2 id="feedback-title">留言箱</h2></div>
+          <button type="button" className="feedback-close" onClick={() => setOpen(false)} disabled={status === "submitting"} aria-label="关闭留言箱">×</button>
+        </header>
+        {status === "success" ? <div className="feedback-success">
+          <CheckCircle2 size={34} />
+          <strong>感谢你的建议</strong>
+          <p>留言已经提交，我们会根据反馈持续改进网站。</p>
+          <button className="primary-action" onClick={() => setOpen(false)}>关闭</button>
+        </div> : <form className="feedback-form" onSubmit={(event) => void submit(event)}>
+          <label>建议类型<select value={category} onChange={(event) => setCategory(event.target.value)}><option>功能建议</option><option>问题反馈</option><option>内容建议</option><option>其他</option></select></label>
+          <label>建议内容<textarea value={message} maxLength={1200} onChange={(event) => setMessage(event.target.value)} placeholder="请描述你希望增加、调整或修复的内容…" autoFocus /></label>
+          <div className="feedback-count">{message.length} / 1200</div>
+          <label>联系方式（可选）<input value={contact} maxLength={120} onChange={(event) => setContact(event.target.value)} placeholder="邮箱、微信或其他联系方式" /></label>
+          <label className="feedback-honeypot" aria-hidden="true">网址<input value={website} onChange={(event) => setWebsite(event.target.value)} tabIndex={-1} autoComplete="off" /></label>
+          {status === "error" && <p className="feedback-error"><CircleAlert size={15} />{errorMessage}</p>}
+          <div className="feedback-actions">
+            <button type="button" className="secondary-action" onClick={() => setOpen(false)} disabled={status === "submitting"}>取消</button>
+            <button type="submit" className="primary-action" disabled={status === "submitting"}>{status === "submitting" ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}提交建议</button>
+          </div>
+        </form>}
+      </section>
+    </div>}
+  </>;
+}
+
 function AppHeader({ active, onChange, localRecordCount }: { active: ModuleId; onChange: (id: ModuleId) => void; localRecordCount: number | null }) {
   const recordLabel = localRecordCount && localRecordCount > 0 ? `本地记录 ${localRecordCount} 条` : "本地自动保存";
   return (
@@ -354,11 +439,14 @@ function AppHeader({ active, onChange, localRecordCount }: { active: ModuleId; o
       <nav className="main-nav" aria-label="主导航">
         {navItems.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} aria-current={active === item.id ? "page" : undefined} onClick={() => onChange(item.id)}>{item.label}</button>)}
       </nav>
-      <button className={`topbar-records ${active === "records" ? "active" : ""}`} onClick={() => onChange("records")} title="实验记录自动保存在当前浏览器中">
-        <History size={15} />
-        <i />
-        <span>{recordLabel}</span>
-      </button>
+      <div className="topbar-actions">
+        <button className={`topbar-records ${active === "records" ? "active" : ""}`} onClick={() => onChange("records")} title="实验记录自动保存在当前浏览器中">
+          <History size={15} />
+          <i />
+          <span>{recordLabel}</span>
+        </button>
+        <FeedbackBox active={active} />
+      </div>
     </header>
   );
 }
