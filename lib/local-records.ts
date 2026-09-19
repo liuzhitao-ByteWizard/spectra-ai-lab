@@ -1,4 +1,5 @@
 import type { ExperimentImageSlot, RecordSnapshot, SavedRecord } from "./experiment-record";
+import { normalizeAuraUsage } from "./aura-usage";
 
 const DB_NAME = "spectra-local-records";
 const DB_VERSION = 1;
@@ -282,7 +283,7 @@ export function buildRecordsCsv(records: SavedRecord[]) {
   const headers = [
     "记录编号", "创建时间", "最后更新", "光源", "状态", "质量", "结果标签", "结果值",
     "光栅线密度(线/mm)", "光栅常数d(μm)", "x0(px)", "L(px)", "拟合RMSE(nm)", "最大残差(nm)",
-    "匹配谱线数", "候选峰数", "图像宽度(px)", "图像高度(px)", "诊断意见", "谱线明细",
+    "匹配谱线数", "候选峰数", "图像宽度(px)", "图像高度(px)", "诊断意见", "谱线明细", "AURA使用历史",
   ];
   const rows = records.map((record) => {
     const data = currentRecordData(record);
@@ -301,6 +302,7 @@ export function buildRecordsCsv(records: SavedRecord[]) {
       record.quality, record.resultLabel, record.resultValue, data.linesPerMm, data.dUm, data.calibration.x0Px,
       data.calibration.effectiveLPx, rmse, maxResidual, data.lines.length, data.processing.candidateCount,
       data.summary.imageWidth, data.summary.imageHeight, record.diagnosis, JSON.stringify(lineDetails),
+      normalizeAuraUsage(record.payload.assistant).used ? JSON.stringify(normalizeAuraUsage(record.payload.assistant)) : "",
     ];
   });
   return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
@@ -372,6 +374,8 @@ async function importLocalRecordsCsv(file: File) {
     }));
     const statusText = value("状态");
     const status = statusText === "已完成" ? "completed" : statusText === "需复核" ? "needs_review" : "draft";
+    let assistant = normalizeAuraUsage(null);
+    try { assistant = normalizeAuraUsage(JSON.parse(value("AURA使用历史") || "null")); } catch { assistant = normalizeAuraUsage(null); }
     const result = x0Px !== null || effectiveLPx !== null || lines.length ? {
       summary: { mode: "calibration", imageWidth, imageHeight, detectedCount: lines.length, usableCount: lines.length, matchedCount: lines.length, rmseNm, maxAbsResidualNm: maxResidualNm, fitQuality: value("质量"), dUm, manualCalibration: false, offlineFallback: false },
       calibration: x0Px !== null && effectiveLPx !== null && dUm !== null ? { dUm, x0Px, effectiveLPx, rmseNm: rmseNm ?? 0, sourceLineCount: lines.length, validRangeNm: [0, 0], createdAt: new Date(updatedAt).toISOString() } : undefined,
@@ -380,7 +384,7 @@ async function importLocalRecordsCsv(file: File) {
     prepared.push({
       id, createdAt, updatedAt, version: 1, task: "A", source: value("光源") || "汞灯光谱",
       resultLabel: value("结果标签") || "几何标定", resultValue: value("结果值") || "已导入", quality: value("质量") || "已导入", status,
-      steps: ["CSV 导入", "本地记录恢复"], diagnosis: value("诊断意见"), payload: { measurementType: "known-grating-spectrum-calibration", state: { linesPerMm, gratingDUm: dUm, order: 1, complete: status === "completed" }, result },
+      steps: ["CSV 导入", "本地记录恢复"], diagnosis: value("诊断意见"), payload: { measurementType: "known-grating-spectrum-calibration", state: { linesPerMm, gratingDUm: dUm, order: 1, complete: status === "completed" }, result, ...(assistant.used ? { assistant } : {}) },
     });
   }
   const database = await openDatabase();

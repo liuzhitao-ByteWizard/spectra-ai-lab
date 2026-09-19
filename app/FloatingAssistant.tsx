@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Bot, EyeOff, Lightbulb, MapPin, Send, X } from "lucide-react";
 import AssistantAnswer from "./AssistantAnswer";
+import { classifyAuraQuestion, type AuraUsageEventInput } from "@/lib/aura-usage";
 import type { ExperimentJourney } from "@/lib/experiment-journey";
 import {
   captureAuraAction,
@@ -49,12 +50,14 @@ function FloatingAssistant({
   activeModule,
   localRecordCount,
   onNavigate,
+  onAuraUsage,
 }: {
   journey: ExperimentJourney;
   authenticated: boolean;
   activeModule: AuraModuleId;
   localRecordCount: number | null;
   onNavigate: (id: AuraModuleId) => void;
+  onAuraUsage: (event: AuraUsageEventInput) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
@@ -79,8 +82,12 @@ function FloatingAssistant({
   const hintCountRef = useRef(0);
   const hintDisabledRef = useRef(false);
   const hintBubbleVisibleRef = useRef(false);
-  const bubbleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bubbleTimerRef = useRef<number | null>(null);
   const suggestionRef = useRef<AuraSuggestion>({ text: "先选择页面上的主要操作按钮开始实验。" });
+
+  const trackAuraUsage = useCallback((event: Omit<AuraUsageEventInput, "module">) => {
+    onAuraUsage({ ...event, module: activeModule });
+  }, [activeModule, onAuraUsage]);
 
   const buildContext = useCallback(() => collectAuraPageContext({
     module: activeModule,
@@ -172,6 +179,7 @@ function FloatingAssistant({
       lastHintAtRef.current = now;
       hintBubbleVisibleRef.current = true;
       writeSessionValue(AUTO_HINT_COUNT_KEY, String(hintCountRef.current));
+      trackAuraUsage({ action: "auto_hint_shown" });
       setHintBubble({ ...suggestion, id: now });
       if (bubbleTimerRef.current) window.clearTimeout(bubbleTimerRef.current);
       bubbleTimerRef.current = window.setTimeout(() => {
@@ -187,7 +195,7 @@ function FloatingAssistant({
       window.clearTimeout(initialTimer);
       window.clearInterval(intervalTimer);
     };
-  }, [buildContext, hidden, open, sending]);
+  }, [buildContext, hidden, open, sending, trackAuraUsage]);
 
   useEffect(() => () => {
     if (bubbleTimerRef.current) window.clearTimeout(bubbleTimerRef.current);
@@ -205,15 +213,16 @@ function FloatingAssistant({
     ]);
   }, []);
 
-  const openAssistant = useCallback((overrideText?: string) => {
+  const openAssistant = useCallback((overrideText?: string, source: "button" | "hint" = "button") => {
     const context = buildContext();
+    trackAuraUsage({ action: source === "hint" ? "hint_opened" : "assistant_opened" });
     appendPageContextMessage(context, overrideText);
     lastActivityRef.current = Date.now();
     hintBubbleVisibleRef.current = false;
     setHintBubble(null);
     setOpen(true);
     setMenu(null);
-  }, [appendPageContextMessage, buildContext]);
+  }, [appendPageContextMessage, buildContext, trackAuraUsage]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.button !== 0 || activePointerIdRef.current !== null) return;
@@ -299,14 +308,17 @@ function FloatingAssistant({
     if (!value || sending) return;
     const context = buildContext();
     const localAnswer = tryAnswerAuraLocally(value, context);
+    const promptType = classifyAuraQuestion(value);
     setMessages((items) => [...items, { role: "user", text: value }]);
     setQuestion("");
     lastActivityRef.current = Date.now();
     if (localAnswer) {
+      trackAuraUsage({ action: "question_answered_locally", mode: "local", promptType });
       setMessages((items) => [...items, { role: "assistant", text: localAnswer, source: "AURA · 当前页面" }]);
       return;
     }
     if (!authenticated) {
+      trackAuraUsage({ action: "online_login_required", mode: "unavailable", promptType });
       setMessages((items) => [...items, {
         role: "assistant",
         text: "这个问题需要连接在线 AI 后才能深入回答。我现在可以先解释当前按钮、页面状态和下一步；你可以试着问“下一步做什么”或“这个按钮是什么意思”。",
@@ -326,13 +338,15 @@ function FloatingAssistant({
       });
       const data = await response.json() as { answer?: string; sources?: string[]; error?: string };
       if (!response.ok || !data.answer) throw new Error(data.error || "AURA 暂时不可用");
+      trackAuraUsage({ action: "question_answered_online", mode: "online", promptType });
       setMessages((items) => [...items, { role: "assistant", text: data.answer!, source: data.sources?.[0] }]);
     } catch (error) {
+      trackAuraUsage({ action: "online_request_failed", mode: "online", promptType });
       setMessages((items) => [...items, { role: "assistant", text: error instanceof Error ? error.message : "AURA 暂时不可用，请稍后重试。", source: "系统提示" }]);
     } finally {
       setSending(false);
     }
-  }, [authenticated, buildContext, question, sending]);
+  }, [authenticated, buildContext, question, sending, trackAuraUsage]);
 
   if (!pos) return null;
 
@@ -358,9 +372,9 @@ function FloatingAssistant({
           <p className="aura-hint-kicker"><Lightbulb size={14} />AURA · 当前页面提示</p>
           <p className="aura-hint-text">{hintBubble.text}</p>
           <div className="aura-hint-actions">
-            <button className="aura-hint-primary" onClick={() => openAssistant(hintBubble.text)}>问问 AURA <ArrowRight size={14} /></button>
+            <button className="aura-hint-primary" onClick={() => openAssistant(hintBubble.text, "hint")}>问问 AURA <ArrowRight size={14} /></button>
             {hintBubble.target && hintBubble.target !== activeModule && (
-              <button onClick={() => { onNavigate(hintBubble.target!); setHintBubble(null); }}>{hintBubble.actionLabel ?? "带我去"}</button>
+              <button onClick={() => { trackAuraUsage({ action: "hint_navigation", targetModule: hintBubble.target }); onNavigate(hintBubble.target!); setHintBubble(null); }}>{hintBubble.actionLabel ?? "带我去"}</button>
             )}
           </div>
           <button className="aura-hint-mute" onClick={dismissAutoHints}>本会话不再自动提示</button>

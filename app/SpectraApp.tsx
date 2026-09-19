@@ -40,6 +40,7 @@ import {
   type ExperimentTask, type RecordSnapshot, type SavedRecord,
 } from "@/lib/experiment-record";
 import { emptyJourney, mergeJourney, type ExperimentJourney } from "@/lib/experiment-journey";
+import { appendAuraUsageEvent, auraUsageActionLabel, auraUsageModuleLabel, auraUsagePromptLabel, emptyAuraUsage, normalizeAuraUsage, type AuraUsageEventInput } from "@/lib/aura-usage";
 import { buildRecordsCsv, deleteLocalRecord, exportLocalRecordsBackup, importLocalRecordsFile, listLocalRecords, saveLocalRecord } from "@/lib/local-records";
 import { buildExperimentReportHtml } from "./api/records/report-html";
 
@@ -1607,13 +1608,15 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, finishExper
           stages: ["虚拟预习", "光谱图采集与质量检查", "谱线自动匹配与确认", "光栅参数设定", "物理约束标定（求解 x₀ 与 L）", "谱线预测与残差复核", "本地保存与实验复盘"],
           limitation: "光栅刻线密度作为已知参数，系统通过汞灯参考谱线标定图像几何参数 x₀ 与 L，并预测各条谱线波长及残差。",
         },
+        assistant: journey.assistant,
       },
     };
-  }, [diagnosis, file, hasResult, journey.prelab, lineResiduals, linesPerMm, minDistance, prominence, result, blockReason]);
+  }, [diagnosis, file, hasResult, journey.assistant, journey.prelab, lineResiduals, linesPerMm, minDistance, prominence, result, blockReason]);
 
   const hydrateRecord = useCallback(async (record: SavedRecord) => {
     const state = record.payload.state && typeof record.payload.state === "object" ? record.payload.state as Record<string, unknown> : {};
     if (record.task !== "A") return;
+    updateJourney({ assistant: normalizeAuraUsage(record.payload.assistant) });
     setDiagnosis(record.diagnosis);
     if (typeof state.prominence === "number") setProminence(state.prominence);
     if (typeof state.minDistance === "number") setMinDistance(state.minDistance);
@@ -1637,7 +1640,7 @@ function AnalysisModule({ analyzeSignal = 0, journey, updateJourney, finishExper
       setResult(null);
       setStatus(file ? "ready" : "idle");
     }
-  }, [file]);
+  }, [file, updateJourney]);
 
   const sync = useExperimentSync({ task, enabled: Boolean(file), snapshot: recordSnapshot, pendingImagesRef, onRemoteRecord: hydrateRecord });
   const syncLabel = localSyncLabel(sync.phase, sync.lastSyncedAt);
@@ -1804,8 +1807,8 @@ function AnalysisModuleV2({ analyzeSignal = 0, journey, updateJourney, finishExp
   const blockReason = !aImage ? "请上传光谱图" : !Number.isFinite(knownDUm) || knownDUm <= 0 ? "请输入有效的光栅常数 d" : usableReadings.length < 2 ? "需要至少两条汞灯参考线才能标定" : !calibResult ? "点击执行几何标定" : !unknownResults.length ? "请点击一个或多个未知峰" : "";
   const status = !aImage ? "待上传" : hasResult ? "已完成" : "可继续";
   useEffect(() => { updateJourney({ capture: { imageCount: Number(Boolean(aImage)), exposureOk: Boolean(aImage && !aImage.overexposed), sharpnessOk: Boolean(aImage?.sharpnessOk), zeroX: calibResult?.x0Px ?? null, zeroReferenceCaptured: Boolean(calibResult), zeroReadingDeg: null, peakCount: aImage?.peaks.length ?? 0 }, identification: { matchedLines: aMarkers.length, yellowDoubletResolved: false }, inversion: { reportable: hasResult, dUm: Number.isFinite(knownDUm) && knownDUm > 0 ? knownDUm : null, expandedUncertaintyUm: null, correlation: null, profileLowUm: null, profileHighUm: null, boundaryHit: false, blockReason: hasResult ? "" : blockReason } }); }, [aImage, aMarkers.length, calibResult, hasResult, knownDUm, blockReason, updateJourney]);
-  const recordSnapshot = useMemo<RecordSnapshot>(() => { const resultValue = hasResult ? unknownResults.length === 1 ? `${unknownResults[0].lambdaNm.toFixed(2)} nm` : `${unknownResults.length} 条未知谱线` : "进行中"; const steps = [aImage && !aImage.overexposed && aImage.sharpnessOk ? "光谱图采集与质量检查" : "", aMarkers.length >= 2 ? "汞灯参考线匹配与确认" : "", calibResult ? "几何标定（求解零级位置与相机距离）" : "", unknownResults.length ? "未知峰选择与波长计算" : "", hasResult ? "不确定度评估" : ""].filter(Boolean); return { task: "A", source: "未知光源", resultLabel: "未知波长 λ", resultValue, quality: hasResult ? "可报告" : blockReason, status: hasResult ? "completed" : "draft", steps, diagnosis, payload: { measurementType: "known-grating-unknown-wavelength", state: { detector, complete: Boolean(calibResult), sample: Boolean(aSource?.sample), gratingDUm: Number.isFinite(knownDUm) ? knownDUm : null, order, selectedUnknownPeaks }, referenceMarkers: aMarkers, result: calibResult ? { calibration: calibResult, unknownPeaks: unknownResults, reportable: hasResult, blockReason } : null, processing: { peaks: aImage?.peaks.length ?? 0, overexposed: Boolean(aImage?.overexposed), sharpnessOk: Boolean(aImage?.sharpnessOk) }, evidence: { stages: ["光谱图采集与质量检查", "汞灯参考线匹配与确认", "几何标定", "未知峰选择与波长计算", "不确定度评估", "本地保存与实验复盘"], limitation: "汞灯参考线仅用于标定图像几何；未知波长由已知光栅常数 d、像素位置和衍射级次计算。" } } }; }, [aImage, aMarkers, aSource?.sample, blockReason, calibResult, detector, diagnosis, hasResult, knownDUm, order, selectedUnknownPeaks, unknownResults]);
-  const hydrateRecord = useCallback(async (record: SavedRecord) => { const state = record.payload.state && typeof record.payload.state === "object" ? record.payload.state as Record<string, unknown> : {}; const markers = Array.isArray(record.payload.referenceMarkers) ? record.payload.referenceMarkers.filter((item): item is ReferenceMarker => Boolean(item) && typeof item === "object" && typeof (item as ReferenceMarker).wavelengthNm === "number" && typeof (item as ReferenceMarker).xRatio === "number") : []; setAMarkers(markers); setDiagnosis(record.diagnosis); if (typeof state.gratingDUm === "number") setGratingDInput(String(state.gratingDUm)); if (typeof state.order === "number") setOrderInput(String(state.order)); if (Array.isArray(state.selectedUnknownPeaks)) setSelectedUnknownPeaks(state.selectedUnknownPeaks.filter((item): item is number => typeof item === "number")); const result = record.payload.result && typeof record.payload.result === "object" ? record.payload.result as Record<string, unknown> : {}; const calibration = result.calibration && typeof result.calibration === "object" ? result.calibration as GeometryCalibration : null; if (calibration?.x0Px !== undefined) setCalibResult(calibration); if (state.sample) setASource(buildSampleSource()); else setASource(record.imageUrls.primary ? await sourceFromSyncedImage(record.imageUrls.primary).catch(() => null) : null); }, []);
+  const recordSnapshot = useMemo<RecordSnapshot>(() => { const resultValue = hasResult ? unknownResults.length === 1 ? `${unknownResults[0].lambdaNm.toFixed(2)} nm` : `${unknownResults.length} 条未知谱线` : "进行中"; const steps = [aImage && !aImage.overexposed && aImage.sharpnessOk ? "光谱图采集与质量检查" : "", aMarkers.length >= 2 ? "汞灯参考线匹配与确认" : "", calibResult ? "几何标定（求解零级位置与相机距离）" : "", unknownResults.length ? "未知峰选择与波长计算" : "", hasResult ? "不确定度评估" : ""].filter(Boolean); return { task: "A", source: "未知光源", resultLabel: "未知波长 λ", resultValue, quality: hasResult ? "可报告" : blockReason, status: hasResult ? "completed" : "draft", steps, diagnosis, payload: { measurementType: "known-grating-unknown-wavelength", state: { detector, complete: Boolean(calibResult), sample: Boolean(aSource?.sample), gratingDUm: Number.isFinite(knownDUm) ? knownDUm : null, order, selectedUnknownPeaks }, referenceMarkers: aMarkers, result: calibResult ? { calibration: calibResult, unknownPeaks: unknownResults, reportable: hasResult, blockReason } : null, processing: { peaks: aImage?.peaks.length ?? 0, overexposed: Boolean(aImage?.overexposed), sharpnessOk: Boolean(aImage?.sharpnessOk) }, evidence: { stages: ["光谱图采集与质量检查", "汞灯参考线匹配与确认", "几何标定", "未知峰选择与波长计算", "不确定度评估", "本地保存与实验复盘"], limitation: "汞灯参考线仅用于标定图像几何；未知波长由已知光栅常数 d、像素位置和衍射级次计算。" }, assistant: journey.assistant } }; }, [aImage, aMarkers, aSource?.sample, blockReason, calibResult, detector, diagnosis, hasResult, journey.assistant, knownDUm, order, selectedUnknownPeaks, unknownResults]);
+  const hydrateRecord = useCallback(async (record: SavedRecord) => { const state = record.payload.state && typeof record.payload.state === "object" ? record.payload.state as Record<string, unknown> : {}; const markers = Array.isArray(record.payload.referenceMarkers) ? record.payload.referenceMarkers.filter((item): item is ReferenceMarker => Boolean(item) && typeof item === "object" && typeof (item as ReferenceMarker).wavelengthNm === "number" && typeof (item as ReferenceMarker).xRatio === "number") : []; updateJourney({ assistant: normalizeAuraUsage(record.payload.assistant) }); setAMarkers(markers); setDiagnosis(record.diagnosis); if (typeof state.gratingDUm === "number") setGratingDInput(String(state.gratingDUm)); if (typeof state.order === "number") setOrderInput(String(state.order)); if (Array.isArray(state.selectedUnknownPeaks)) setSelectedUnknownPeaks(state.selectedUnknownPeaks.filter((item): item is number => typeof item === "number")); const result = record.payload.result && typeof record.payload.result === "object" ? record.payload.result as Record<string, unknown> : {}; const calibration = result.calibration && typeof result.calibration === "object" ? result.calibration as GeometryCalibration : null; if (calibration?.x0Px !== undefined) setCalibResult(calibration); if (state.sample) setASource(buildSampleSource()); else setASource(record.imageUrls.primary ? await sourceFromSyncedImage(record.imageUrls.primary).catch(() => null) : null); }, [updateJourney]);
   const sync = useExperimentSync({ task, enabled: Boolean(aImage), snapshot: recordSnapshot, pendingImagesRef, onRemoteRecord: hydrateRecord });
   const syncLabel = localSyncLabel(sync.phase, sync.lastSyncedAt);
   const resultSyncSignature = hasResult ? `${recordSnapshot.resultValue}|${unknownResults.map((item) => `${item.xPx}:${item.lambdaNm}`).join(",")}` : "";
@@ -1905,6 +1908,9 @@ function RecordsModule() {
 
   const markerCount = Array.isArray(selected?.payload.referenceMarkers) ? selected.payload.referenceMarkers.length : 0;
   const imageEntries = selected ? Object.entries(selected.imageUrls) as [ExperimentImageSlot, string][] : [];
+  const auraUsage = selected ? normalizeAuraUsage(selected.payload.assistant) : emptyAuraUsage();
+  const auraEvents = [...auraUsage.events].reverse().slice(0, 8);
+  const auraModeLabel = auraUsage.mode === "mixed" ? "本地 + 在线" : auraUsage.mode === "online" ? "在线 AI" : auraUsage.mode === "local" ? "本地页面助教" : "未记录";
 
   return <div className="module-page">
     <PageHeading
@@ -1943,6 +1949,13 @@ function RecordsModule() {
           <div className="record-evidence"><span><small>已完成阶段</small><strong>{selected.steps.length} 项</strong></span><span><small>匹配汞线</small><strong>{markerCount} 条</strong></span><span><small>记录状态</small><strong>{selected.quality}</strong></span></div>
           {imageEntries.length > 0 && <div className="record-images">{imageEntries.map(([slot, url]) => <figure key={slot}><img src={url} alt="原始光谱照片" /><figcaption>{slot === "zero_reference" ? "零级参考照片" : slot === "primary" ? "一级单侧谱图" : slot === "repeat_2" ? "重复照片 2" : "重复照片 3"}</figcaption></figure>)}</div>}
           <div className="timeline">{selected.steps.length ? selected.steps.map((step, index) => <div className="timeline-item" key={step}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step}</strong><p>{step === "d 反演及不确定度评估" ? `${selected.resultLabel} = ${selected.resultValue}` : "该阶段的参数和证据已保存在本机。"}</p></div>{index < selected.steps.length - 1 && <i />}</div>) : <div className="record-empty compact"><History size={28} /><strong>实验尚未开始</strong></div>}</div>
+          <div className="record-aura">
+            <div className="record-aura-head"><div><strong>AURA 辅助使用历史</strong><p>仅记录页面交互类型、模块和时间，不保存提问或回答原文。</p></div><span>{auraUsage.used ? `${auraUsage.interactionCount} 次` : "未记录"}</span></div>
+            {auraUsage.used ? <div className="record-aura-body">
+              <div className="record-aura-metrics"><span><small>使用模式</small><strong>{auraModeLabel}</strong></span><span><small>最后模块</small><strong>{auraUsageModuleLabel(auraUsage.lastModule)}</strong></span><span><small>最后使用</small><strong>{auraUsage.lastUsedAt ? formatChinaDateTime(auraUsage.lastUsedAt) : "未记录"}</strong></span></div>
+              {auraEvents.length > 0 && <div className="record-aura-events">{auraEvents.map((event, index) => <div key={`${event.at}-${event.action}-${index}`}><span>{formatChinaDateTime(event.at)}</span><strong>{auraUsageActionLabel(event.action)}</strong><small>{auraUsageModuleLabel(event.targetModule ?? event.module)}{event.promptType ? ` · ${auraUsagePromptLabel(event.promptType)}` : ""}</small></div>)}</div>}
+            </div> : <p className="record-aura-empty">这条记录没有保存 AURA 使用历史。旧记录不包含该字段，属于正常情况。</p>}
+          </div>
           <div className="record-diagnosis"><strong>异常诊断与复核意见</strong><p>{selected.diagnosis || "未填写异常诊断或复核意见。"}</p></div>
         </> : <div className="record-empty"><Microscope size={34} /><strong>选择一条记录开始回放</strong></div>}
       </section>
@@ -1972,9 +1985,17 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
         identification: { ...current.identification, ...(patch.identification ?? {}) },
         inversion: { ...current.inversion, ...(patch.inversion ?? {}) },
         archive: { ...current.archive, ...(patch.archive ?? {}) },
+        assistant: patch.assistant ?? current.assistant,
       });
       return JSON.stringify({ ...next, updatedAt: 0 }) === JSON.stringify({ ...current, updatedAt: 0 }) ? current : next;
     });
+  }, []);
+  const recordAuraUsage = useCallback((event: AuraUsageEventInput) => {
+    setJourney((current) => ({
+      ...current,
+      assistant: appendAuraUsageEvent(current.assistant, event),
+      updatedAt: Date.now(),
+    }));
   }, []);
   const resetExperiment = useCallback(() => {
     if (journeySaveTimerRef.current) clearTimeout(journeySaveTimerRef.current);
@@ -2044,5 +2065,5 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} localRecordCount={localRecordCount} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} activeModule={active} localRecordCount={localRecordCount} onNavigate={setActive} /><Toaster position="top-center" richColors /></main>;
+  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} localRecordCount={localRecordCount} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} activeModule={active} localRecordCount={localRecordCount} onNavigate={setActive} onAuraUsage={recordAuraUsage} /><Toaster position="top-center" richColors /></main>;
 }
