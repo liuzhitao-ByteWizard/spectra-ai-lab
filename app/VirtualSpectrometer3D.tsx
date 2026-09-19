@@ -298,7 +298,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     // Keep the selected line on its physical angle and exaggerate only the companion line for visibility.
     return baseAngle + (angle - baseAngle) * 8;
   }, [displayedLines, linesPerMm, selectedWavelength, stageAngle]);
-  const observationLabel = activeObservationOrder === 1 ? "右侧 +1 级" : "左侧 −1 级";
+  const observationLabel = activeObservationOrder === 1 ? "左侧 +1 级" : "右侧 −1 级";
   const rawReadings = useMemo(() => makeVernierReadings(telescopeAngle), [telescopeAngle]);
   const alignmentTolerance = clamp(.035 + (1 - focus) * .26 + (1 - collimatorFocus) * .24 + slitOptics.broadening * .2, .045, .28);
   const zeroAligned = Math.abs(getOpticalOffset(0, telescopeAxisAngle)) <= alignmentTolerance;
@@ -963,7 +963,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
     const rows = [
       ["光源", "观测侧/级次", "标准波长/nm", "谱线", "游标A", "游标B", "单侧校正衍射角/deg", "计算波长/nm", "相对误差/%"],
       ...records.map((record) => [
-        LIGHT_SOURCES[record.source].name, record.order === 1 ? "右侧 +1" : "左侧 −1", record.wavelengthNm.toFixed(2), record.label, formatDms(record.raw.a), formatDms(record.raw.b),
+        LIGHT_SOURCES[record.source].name, record.order === 1 ? "左侧 +1" : "右侧 −1", record.wavelengthNm.toFixed(2), record.label, formatDms(record.raw.a), formatDms(record.raw.b),
         record.thetaDeg.toFixed(4), record.calculatedNm.toFixed(3), record.errorPercent.toFixed(3),
       ]),
     ];
@@ -1154,7 +1154,7 @@ export default function VirtualSpectrometer3D({ journey, navigate, updateJourney
         <div className="measurement-heading"><div><p className="eyebrow">测量证据</p><h2>双侧一级谱线读数与零级校正</h2></div><div className="measurement-actions"><button onClick={exportCsv}><Download size={16} />导出 CSV</button><button onClick={reset}><RotateCcw size={16} />重新实验</button></div></div>
         <div className="measurement-grid">
           <div className="reading-table-wrap">
-            {records.length ? <table className="virtual-reading-table"><thead><tr><th>光源</th><th>侧 / 级次</th><th>谱线</th><th>游标 A</th><th>游标 B</th><th>校正 θ</th><th>反算 λ</th><th>相对误差</th></tr></thead><tbody>{records.map((record) => <tr key={record.id} className={record.aligned ? "" : "has-warning"}><td>{LIGHT_SOURCES[record.source].shortName}</td><td>{record.order === 1 ? "右 +1" : "左 −1"}</td><td><i style={{ background: LIGHT_SOURCES[record.source].lines.find((line) => line.wavelengthNm === record.wavelengthNm)?.color }} />{record.wavelengthNm.toFixed(2)} nm · {record.label}</td><td>{formatDms(record.raw.a)}</td><td>{formatDms(record.raw.b)}</td><td>{record.thetaDeg.toFixed(3)}°</td><td>{record.calculatedNm.toFixed(2)} nm</td><td>{record.errorPercent >= 0 ? "+" : ""}{record.errorPercent.toFixed(2)}%</td></tr>)}</tbody></table> : <div className="measurement-empty"><Telescope size={27} /><strong>尚未记录谱线</strong><p>对准零级并记录参考后，可测量左右任一侧的一级特征线。</p></div>}
+            {records.length ? <table className="virtual-reading-table"><thead><tr><th>光源</th><th>侧 / 级次</th><th>谱线</th><th>游标 A</th><th>游标 B</th><th>校正 θ</th><th>反算 λ</th><th>相对误差</th></tr></thead><tbody>{records.map((record) => <tr key={record.id} className={record.aligned ? "" : "has-warning"}><td>{LIGHT_SOURCES[record.source].shortName}</td><td>{record.order === 1 ? "左 +1" : "右 −1"}</td><td><i style={{ background: LIGHT_SOURCES[record.source].lines.find((line) => line.wavelengthNm === record.wavelengthNm)?.color }} />{record.wavelengthNm.toFixed(2)} nm · {record.label}</td><td>{formatDms(record.raw.a)}</td><td>{formatDms(record.raw.b)}</td><td>{record.thetaDeg.toFixed(3)}°</td><td>{record.calculatedNm.toFixed(2)} nm</td><td>{record.errorPercent >= 0 ? "+" : ""}{record.errorPercent.toFixed(2)}%</td></tr>)}</tbody></table> : <div className="measurement-empty"><Telescope size={27} /><strong>尚未记录谱线</strong><p>对准零级并记录参考后，可测量左右任一侧的一级特征线。</p></div>}
           </div>
           <div className={`fit-summary ${wavelengthResult ? "has-fit" : ""}`}>
             {wavelengthResult ? <><small>由 {records.length} 条一级读数求平均</small><strong>λ̄ = {wavelengthResult.meanNm.toFixed(2)} nm</strong><span>已知光栅 {linesPerMm} 线/mm · RMSE {wavelengthResult.rmseNm.toFixed(2)} nm</span><p><CheckCircle2 size={16} />{errorText}</p><button onClick={() => navigate("analysis")}>打开图像分析 <ArrowRight size={15} /></button></> : <><Aperture size={28} /><strong>等待波长读数</strong><p>零级差值与已知光栅间距会自动计算 λ = d sin θ。</p></>}
