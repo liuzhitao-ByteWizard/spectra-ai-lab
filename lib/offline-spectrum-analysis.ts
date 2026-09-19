@@ -676,7 +676,12 @@ export async function analyzeSpectrumOffline(
     },
     lines,
     profile: downsampleProfile(profile, width),
-    annotations: lines.map((line) => ({ type: "line", x: line.x, label: line.matchLabel, color: line.color })),
+    annotations: lines.map((line) => ({
+      type: "line",
+      x: line.x,
+      label: `${line.matchLabel} ${line.standardNm.toFixed(2)} nm`,
+      color: line.color,
+    })),
     detectedPeaks: peaks,
     processing: {
       candidateCount: peaks.length,

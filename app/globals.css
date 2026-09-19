@@ -1223,18 +1223,18 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 .analysis-demo .image-stage.is-clickable { cursor: crosshair; }
 .analysis-demo .image-wrap,
 .analysis-demo .image-wrap img { width: 100%; height: 100%; }
-.analysis-demo .image-wrap { position: relative; }
+.analysis-demo .image-wrap {
+  position: relative;
+}
 .analysis-demo .image-wrap img {
   display: block;
   object-fit: contain;
 }
 .analysis-demo .marker {
   position: absolute;
-  top: 22%;
-  height: 58%;
   width: 2px;
   background: var(--marker-color);
-  transform: translate(-50%);
+  transform: translateX(-50%);
   box-shadow: 0 0 16px var(--marker-color);
   pointer-events: none;
 }
@@ -1434,7 +1434,72 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
 .analysis-demo .metric.green strong { color: #167344; }
 .analysis-demo .metric.blue strong { color: #0b62d1; }
 .analysis-demo .metric.gold strong { color: #b45309; }
-.analysis-demo .results-chart { grid-row: span 2; }
+/* 图表卡跨两行，撑成 flex 列，让绘图区吃满卡片高度 */
+.analysis-demo .results-chart {
+  grid-row: span 2;
+  display: flex;
+  flex-direction: column;
+}
+.analysis-demo .profile-chart-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 220px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #f4f8fc;
+}
+.analysis-demo .profile-chart {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+/* 非等比拉伸会改变描边宽度，统一锁回设计宽度 */
+.analysis-demo .profile-chart line,
+.analysis-demo .profile-chart polyline,
+.analysis-demo .profile-chart .peak-line {
+  vector-effect: non-scaling-stroke;
+}
+.analysis-demo .profile-chart line { stroke: #cbd9e6; }
+.analysis-demo .profile-chart polyline {
+  fill: none;
+  stroke: #1689d5;
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+.analysis-demo .profile-chart .peak-line {
+  stroke-width: 2;
+  opacity: 1;
+}
+/* 剖面图里的谱线同样套同色外发光：远晕与近晕两层同色描线 */
+.analysis-demo .profile-chart .peak-line.halo { stroke-linecap: round; }
+.analysis-demo .profile-chart .peak-line.halo.near { stroke-width: 6; opacity: .28; }
+.analysis-demo .profile-chart .peak-line.halo.far { stroke-width: 13; opacity: .12; }
+/* 标签走 HTML，否则随 SVG 纵向拉伸会被压扁 */
+.analysis-demo .profile-chart-label {
+  position: absolute;
+  z-index: 1;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: #ffffffd9;
+  box-shadow: 0 1px 3px #0f172a14;
+  transform: translate(8px, -50%);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.analysis-demo .profile-chart-label.is-flip { transform: translate(calc(-100% - 8px), -50%); }
+.analysis-demo .profile-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  color: #8597a9;
+  font-size: 18px;
+  text-align: center;
+}
 .analysis-demo .processing-panel { grid-column: 1 / -1; }
 .analysis-demo .result-panel {
   min-height: auto;
@@ -1449,31 +1514,6 @@ footer span { display: flex; align-items: center; gap: 7px; color: #51687f; font
   font-size: 17px;
   color: var(--ink);
   letter-spacing: -.01em;
-}
-.analysis-demo .profile-chart {
-  width: 100%;
-  min-height: 240px;
-  display: block;
-}
-.analysis-demo .profile-chart rect { fill: #f4f8fc; }
-.analysis-demo .profile-chart line { stroke: #cbd9e6; }
-.analysis-demo .profile-chart polyline {
-  fill: none;
-  stroke: #1689d5;
-  stroke-width: 4;
-  stroke-linejoin: round;
-}
-.analysis-demo .profile-chart .peak-line {
-  stroke-width: 2;
-  opacity: .9;
-}
-.analysis-demo .profile-chart text {
-  fill: #55728d;
-  font-size: 14px;
-}
-.analysis-demo .profile-chart .empty-chart {
-  fill: #8597a9;
-  font-size: 20px;
 }
 .analysis-demo .wavelength-strip {
   display: flex;

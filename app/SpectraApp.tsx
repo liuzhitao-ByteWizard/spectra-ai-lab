@@ -932,7 +932,8 @@ function ImageStage({
     const observer = new ResizeObserver(update);
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+    // 空状态不渲染图片容器，stageRef 此时为空；必须随 preview 重新挂载观察器。
+  }, [preview]);
 
   useEffect(() => {
     const image = stageRef.current?.querySelector("img");
@@ -948,7 +949,8 @@ function ImageStage({
 
   const fit = useMemo(() => {
     const imageWidth = width || naturalWidth;
-    if (!box.width || !box.height || !imageWidth || !naturalHeight) return { left: 0, top: 0, width: box.width, height: box.height };
+    if (!box.width || !box.height) return { left: 0, top: 0, width: 0, height: 0 };
+    if (!imageWidth || !naturalHeight) return { left: 0, top: 0, width: box.width, height: box.height };
     const ratio = imageWidth / naturalHeight;
     const stageRatio = box.width / box.height;
     if (ratio > stageRatio) {
@@ -987,25 +989,48 @@ function ImageStage({
     );
   }
 
+  // Show markers whenever we have a usable x range; prefer letterboxed fit when known.
+  const usableWidth = imageWidth > 0 ? imageWidth : naturalWidth;
+  const showMarkers = usableWidth > 0 && markers.length > 0;
+
   return (
     <div ref={stageRef} className={`image-stage ${onAddManualPoint ? "is-clickable" : ""}`} onClick={handleClick}>
       <div className="image-wrap">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={preview} alt="光谱照片预览" onLoad={(event) => setNaturalWidth(event.currentTarget.naturalWidth || 0)} />
-        {markers.map((marker, index) => (
-          <span
-            key={`${marker.type}-${marker.x}-${index}`}
-            className={`marker ${marker.type}`}
-            style={{
-              left: `${fit.left + (imageWidth ? marker.x / imageWidth * fit.width : fit.width / 2)}px`,
-              top: `${fit.top + fit.height * 0.22}px`,
-              height: `${fit.height * 0.58}px`,
-              "--marker-color": marker.color || "#1f7a5a",
-            } as React.CSSProperties}
-            title={marker.label}
-            aria-label={marker.label}
-          />
-        ))}
+        <img
+          src={preview}
+          alt="光谱照片预览"
+          onLoad={(event) => {
+            setNaturalWidth(event.currentTarget.naturalWidth || 0);
+            setNaturalHeight(event.currentTarget.naturalHeight || 0);
+          }}
+        />
+        {showMarkers && markers.map((marker, index) => {
+          if (!Number.isFinite(marker.x)) return null;
+          const hasFit = naturalHeight > 0 && fit.width > 0 && fit.height > 0;
+          const left = hasFit
+            ? fit.left + (marker.x / usableWidth) * fit.width
+            : (Math.min(Math.max(marker.x, 0), usableWidth) / usableWidth) * box.width;
+          const imageTop = hasFit ? fit.top : 0;
+          const imageHeight = hasFit ? fit.height : box.height;
+          const top = imageTop + imageHeight * 0.22;
+          const height = imageHeight * 0.58;
+          if (!Number.isFinite(left) || !Number.isFinite(height) || height < 20) return null;
+          return (
+            <span
+              key={`${marker.type}-${marker.x}-${index}`}
+              className={`marker ${marker.type}`}
+              style={{
+                left: `${left}px`,
+                top: `${top}px`,
+                height: `${height}px`,
+                "--marker-color": marker.color || "#1f7a5a",
+              } as React.CSSProperties}
+              title={marker.label}
+              aria-label={marker.label}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -1073,20 +1098,45 @@ function ManualPanel({
 function ProfileChart({ result }: { result: CalibrationResult | null }) {
   const imageWidth = result?.summary?.imageWidth || 1100;
   const points = (result?.profile ?? []).map((point) => `${60 + point.x / imageWidth * 860},${300 - point.y * 220}`).join(" ");
+  const annotations = result?.annotations ?? [];
+  const svgX = (x: number) => x / 980 * 100;
   return (
-    <svg viewBox="0 0 980 330" className="profile-chart" role="img" aria-label="光强剖面">
-      <rect x="0" y="0" width="980" height="330" rx="18" />
-      {[0, 1, 2, 3].map((index) => <line key={index} x1="60" x2="920" y1={82 + index * 56} y2={82 + index * 56} />)}
-      <line x1="60" x2="920" y1="300" y2="300" />
-      {points && <polyline points={points} />}
-      {(result?.annotations ?? []).map((annotation, index) => (
-        <g key={`${annotation.x}-${index}`}>
-          <line className="peak-line" x1={60 + annotation.x / imageWidth * 860} x2={60 + annotation.x / imageWidth * 860} y1="54" y2="306" stroke={annotation.color} />
-          <text x={64 + annotation.x / imageWidth * 860} y="48">{annotation.label}</text>
-        </g>
-      ))}
-      {!result && <text className="empty-chart" x="330" y="185">完成分析后显示光强曲线与峰位</text>}
-    </svg>
+    <div className="profile-chart-wrap">
+      {/* preserveAspectRatio=none 让绘图区撑满卡片；描边统一走 non-scaling-stroke，宽度不随拉伸变形 */}
+      <svg viewBox="0 0 980 330" preserveAspectRatio="none" className="profile-chart" role="img" aria-label="光强剖面">
+        {[0, 1, 2, 3].map((index) => <line key={index} x1="60" x2="920" y1={82 + index * 56} y2={82 + index * 56} />)}
+        <line x1="60" x2="920" y1="300" y2="300" />
+        {points && <polyline points={points} />}
+        {annotations.map((annotation, index) => {
+          const x = 60 + annotation.x / imageWidth * 860;
+          // 每层都用谱线自身颜色：远晕 → 近晕 → 亮线，形成同色外发光与描边
+          return (
+            <g key={`${annotation.x}-${index}`}>
+              <line className="peak-line halo far" x1={x} x2={x} y1="54" y2="306" style={{ stroke: annotation.color }} />
+              <line className="peak-line halo near" x1={x} x2={x} y1="54" y2="306" style={{ stroke: annotation.color }} />
+              <line className="peak-line" x1={x} x2={x} y1="54" y2="306" style={{ stroke: annotation.color }} />
+            </g>
+          );
+        })}
+      </svg>
+      {annotations.map((annotation, index, list) => {
+        const x = 60 + annotation.x / imageWidth * 860;
+        const prevX = index > 0 ? 60 + list[index - 1].x / imageWidth * 860 : null;
+        // 黄色双线峰位极近，标签错开一行避免叠字
+        const labelY = prevX !== null && x - prevX < 46 ? 30 : 48;
+        const flip = x > 640;
+        return (
+          <span
+            key={`label-${annotation.x}-${index}`}
+            className={`profile-chart-label${flip ? " is-flip" : ""}`}
+            style={{ left: `${svgX(x)}%`, top: `${labelY / 330 * 100}%`, color: annotation.color }}
+          >
+            {annotation.label}
+          </span>
+        );
+      })}
+      {!result && <span className="profile-chart-empty">完成分析后显示光强曲线与峰位</span>}
+    </div>
   );
 }
 
