@@ -353,6 +353,9 @@ h1 { margin: 0; max-width: 760px; font-size: clamp(25px, 3vw, 38px); line-height
 .evidence-list p svg { flex: none; color: #1972e8; }
 .evidence-list > small { display: block; margin-top: 10px; color: #7f90a3; font-size: 12px; line-height: 1.6; }
 
+.records-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.records-import { position: relative; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; overflow: hidden; }
+.records-import input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .records-grid { display: grid; grid-template-columns: minmax(320px, .72fr) minmax(0, 1.5fr); gap: 18px; align-items: start; }
 .record-list .panel-title > span { color: #728398; font-size: 12px; }
 .record-list > button { width: 100%; min-height: 88px; display: grid; grid-template-columns: auto 1fr auto; gap: 11px; align-items: center; padding: 12px 14px; text-align: left; color: #2e4963; background: white; border: 0; border-bottom: 1px solid #e7edf3; }
