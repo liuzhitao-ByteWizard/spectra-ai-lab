@@ -392,6 +392,9 @@ h1 { margin: 0; max-width: 760px; font-size: clamp(25px, 3vw, 38px); line-height
 .record-empty strong { margin-top: 10px; color: #425c75; font-size: 15px; } .record-empty p { max-width: 270px; line-height: 1.65; }
 .replay-panel { min-height: 540px; }
 .replay-head { min-height: 91px; display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 18px 22px; border-bottom: 1px solid #e4ebf2; }
+.replay-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.danger-action { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 12px; color: #b42318; border: 1px solid #f1b6b0; border-radius: 10px; background: #fff6f5; font: inherit; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.danger-action:hover { color: #8f1d14; border-color: #e88980; background: #ffebe8; }
 .replay-head .eyebrow { margin-bottom: 4px; } .replay-head h2 { margin: 0; font-size: 19px; }
 .timeline { padding: 25px 30px; }
 .timeline-item { min-height: 76px; position: relative; display: grid; grid-template-columns: auto 1fr; gap: 14px; }

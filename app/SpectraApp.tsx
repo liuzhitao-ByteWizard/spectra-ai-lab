@@ -7,7 +7,7 @@ import {
   CheckCircle2, ChevronRight, CircleAlert, ClipboardCheck, Clock3,
   Download, ExternalLink, FileText, FlaskConical, History, Home,
   ImagePlus, LoaderCircle, MessageCircle, Microscope, Play,
-  RotateCcw, Save, ScanLine, Send, Sigma, SlidersHorizontal, Target, Telescope,
+  RotateCcw, Save, ScanLine, Send, Sigma, SlidersHorizontal, Target, Telescope, Trash2,
   Upload, Users, Waves,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -40,7 +40,7 @@ import {
   type ExperimentTask, type RecordSnapshot, type SavedRecord,
 } from "@/lib/experiment-record";
 import { emptyJourney, mergeJourney, type ExperimentJourney } from "@/lib/experiment-journey";
-import { buildRecordsCsv, exportLocalRecordsBackup, importLocalRecordsFile, listLocalRecords, saveLocalRecord } from "@/lib/local-records";
+import { buildRecordsCsv, deleteLocalRecord, exportLocalRecordsBackup, importLocalRecordsFile, listLocalRecords, saveLocalRecord } from "@/lib/local-records";
 import { buildExperimentReportHtml } from "./api/records/report-html";
 
 const VirtualSpectrometer3D = dynamic(() => import("./VirtualSpectrometer3D"), {
@@ -1889,6 +1889,20 @@ function RecordsModule() {
     }
   };
 
+  const removeRecord = async (record: SavedRecord) => {
+    if (!window.confirm(`确定删除“${record.resultLabel} · ${record.resultValue}”这条实验记录吗？\n删除后无法恢复，除非你已经导出过备份。`)) return;
+    try {
+      await deleteLocalRecord(record.id);
+      if (selected?.id === record.id) setSelected(null);
+      await refresh();
+      toast.success("实验记录已删除");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "实验记录删除失败";
+      setErrorMessage(message);
+      toast.error(message);
+    }
+  };
+
   const markerCount = Array.isArray(selected?.payload.referenceMarkers) ? selected.payload.referenceMarkers.length : 0;
   const imageEntries = selected ? Object.entries(selected.imageUrls) as [ExperimentImageSlot, string][] : [];
 
@@ -1921,7 +1935,10 @@ function RecordsModule() {
         {selected ? <>
           <div className="replay-head">
             <div><p className="eyebrow">实验回放</p><h2>{selected.resultLabel} · {selected.resultValue}</h2><small>最后保存于 {formatChinaDateTime(selected.updatedAt)}</small></div>
-            <button className="secondary-action" onClick={() => openLocalRecordReport(selected)}><FileText size={16} />查看 / 打印报告</button>
+            <div className="replay-actions">
+              <button className="secondary-action" onClick={() => openLocalRecordReport(selected)}><FileText size={16} />查看 / 打印报告</button>
+              <button className="danger-action" onClick={() => void removeRecord(selected)}><Trash2 size={16} />删除记录</button>
+            </div>
           </div>
           <div className="record-evidence"><span><small>已完成阶段</small><strong>{selected.steps.length} 项</strong></span><span><small>匹配汞线</small><strong>{markerCount} 条</strong></span><span><small>记录状态</small><strong>{selected.quality}</strong></span></div>
           {imageEntries.length > 0 && <div className="record-images">{imageEntries.map(([slot, url]) => <figure key={slot}><img src={url} alt="原始光谱照片" /><figcaption>{slot === "zero_reference" ? "零级参考照片" : slot === "primary" ? "一级单侧谱图" : slot === "repeat_2" ? "重复照片 2" : "重复照片 3"}</figcaption></figure>)}</div>}

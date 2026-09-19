@@ -120,6 +120,19 @@ export async function listLocalRecords(limit = 100) {
     .map((record) => withImageUrls(record, byRecord.get(record.id) ?? []));
 }
 
+export async function deleteLocalRecord(recordId: string) {
+  const database = await openDatabase();
+  const imageKeys = await requestResult(
+    database.transaction(IMAGES_STORE, "readonly").objectStore(IMAGES_STORE).index("recordId").getAllKeys(recordId),
+  );
+  const transaction = database.transaction([RECORDS_STORE, IMAGES_STORE], "readwrite");
+  transaction.objectStore(RECORDS_STORE).delete(recordId);
+  const imageStore = transaction.objectStore(IMAGES_STORE);
+  for (const key of imageKeys) imageStore.delete(key);
+  await transactionDone(transaction);
+  notifyLocalRecordsChanged();
+}
+
 export async function saveLocalRecord(
   snapshot: RecordSnapshot,
   images: Partial<Record<ExperimentImageSlot, File>>,
