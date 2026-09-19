@@ -71,6 +71,7 @@ function FloatingAssistant({
   const btnRef = useRef<HTMLButtonElement>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
   const dragStart = useRef({ x: 0, y: 0 });
+  const activePointerIdRef = useRef<number | null>(null);
   const wasDragged = useRef(false);
   const lastInteractedActionRef = useRef<AuraInteractedAction | null>(null);
   const lastActivityRef = useRef(Date.now());
@@ -215,16 +216,24 @@ function FloatingAssistant({
   }, [appendPageContextMessage, buildContext]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    if (e.button !== 0) return;
-    const rect = btnRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (e.button !== 0 || activePointerIdRef.current !== null) return;
+    const button = btnRef.current;
+    const rect = button?.getBoundingClientRect();
+    if (!button || !rect) return;
+    activePointerIdRef.current = e.pointerId;
     wasDragged.current = false;
     dragStart.current = { x: e.clientX, y: e.clientY };
     dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    button.setPointerCapture(e.pointerId);
   }, []);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (activePointerIdRef.current !== e.pointerId) return;
+    if (e.pointerType === "mouse" && (e.buttons & 1) !== 1) {
+      activePointerIdRef.current = null;
+      setDragging(false);
+      return;
+    }
     if (!wasDragged.current) {
       const distance = Math.hypot(e.clientX - dragStart.current.x, e.clientY - dragStart.current.y);
       if (distance < 5) return;
@@ -239,7 +248,25 @@ function FloatingAssistant({
     });
   }, []);
 
-  const onPointerUp = useCallback(() => { setDragging(false); }, []);
+  const clearPointerDrag = useCallback((pointerId?: number) => {
+    if (pointerId !== undefined && activePointerIdRef.current !== pointerId) return;
+    activePointerIdRef.current = null;
+    setDragging(false);
+  }, []);
+
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
+    const button = btnRef.current;
+    if (button?.hasPointerCapture(e.pointerId)) button.releasePointerCapture(e.pointerId);
+    clearPointerDrag(e.pointerId);
+  }, [clearPointerDrag]);
+
+  const onPointerCancel = useCallback((e: React.PointerEvent) => {
+    clearPointerDrag(e.pointerId);
+  }, [clearPointerDrag]);
+
+  const onLostPointerCapture = useCallback((e: React.PointerEvent) => {
+    clearPointerDrag(e.pointerId);
+  }, [clearPointerDrag]);
 
   const onContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -409,6 +436,8 @@ function FloatingAssistant({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onLostPointerCapture={onLostPointerCapture}
         onContextMenu={onContextMenu}
         aria-label={open ? "关闭 AURA" : "打开 AURA"}
       >
