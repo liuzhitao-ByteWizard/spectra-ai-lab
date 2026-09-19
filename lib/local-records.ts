@@ -24,6 +24,10 @@ type BackupPayload = {
 
 let databasePromise: Promise<IDBDatabase> | null = null;
 
+function notifyLocalRecordsChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("spectra-local-records-changed"));
+}
+
 function openDatabase() {
   if (typeof indexedDB === "undefined") return Promise.reject(new Error("当前浏览器不支持本地记录存储"));
   if (!databasePromise) {
@@ -138,6 +142,7 @@ export async function saveLocalRecord(
     imageStore.put({ recordId: record.id, slot, blob: file, type: file.type || "image/jpeg", updatedAt: now } satisfies StoredImage);
   }
   await transactionDone(transaction);
+  notifyLocalRecordsChanged();
   const savedImages = await readStoredImages(database, record.id);
   return withImageUrls(record, savedImages);
 }
@@ -234,5 +239,6 @@ export async function importLocalRecordsBackup(file: File) {
     }
   }
   await transactionDone(transaction);
+  notifyLocalRecordsChanged();
   return prepared.length;
 }
