@@ -343,7 +343,8 @@ async function analyzeImageFile(file: File): Promise<SpectrumSource> {
   };
 }
 
-function AppHeader({ active, onChange }: { active: ModuleId; onChange: (id: ModuleId) => void }) {
+function AppHeader({ active, onChange, localRecordCount }: { active: ModuleId; onChange: (id: ModuleId) => void; localRecordCount: number | null }) {
+  const recordLabel = localRecordCount && localRecordCount > 0 ? `本地记录 ${localRecordCount} 条` : "本地自动保存";
   return (
     <header className="topbar">
       <button className="brand" onClick={() => onChange("home")} aria-label="返回首页">
@@ -353,7 +354,11 @@ function AppHeader({ active, onChange }: { active: ModuleId; onChange: (id: Modu
       <nav className="main-nav" aria-label="主导航">
         {navItems.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} aria-current={active === item.id ? "page" : undefined} onClick={() => onChange(item.id)}>{item.label}</button>)}
       </nav>
-      <span className="topbar-spacer" aria-hidden="true" />
+      <button className={`topbar-records ${active === "records" ? "active" : ""}`} onClick={() => onChange("records")} title="实验记录自动保存在当前浏览器中">
+        <History size={15} />
+        <i />
+        <span>{recordLabel}</span>
+      </button>
     </header>
   );
 }
@@ -1738,8 +1743,10 @@ function RecordsModule() {
   useEffect(() => {
     const initial = window.setTimeout(() => void refresh(), 0);
     const onFocus = () => void refresh();
+    const onLocalRecordsChanged = () => void refresh();
     window.addEventListener("focus", onFocus);
-    return () => { window.clearTimeout(initial); window.removeEventListener("focus", onFocus); };
+    window.addEventListener("spectra-local-records-changed", onLocalRecordsChanged);
+    return () => { window.clearTimeout(initial); window.removeEventListener("focus", onFocus); window.removeEventListener("spectra-local-records-changed", onLocalRecordsChanged); };
   }, [refresh]);
 
   const exportCsv = () => {
@@ -1873,6 +1880,30 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
       .finally(() => { journeyLoadedRef.current = true; });
     return () => window.clearTimeout(resetTimer);
   }, [authenticated]);
+  const [localRecordCount, setLocalRecordCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let timer = 0;
+    const refreshLocalRecordCount = () => {
+      void listLocalRecords(100)
+        .then((records) => { if (!cancelled) setLocalRecordCount(records.length); })
+        .catch(() => { if (!cancelled) setLocalRecordCount(null); });
+    };
+    const scheduleRefresh = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(refreshLocalRecordCount, 0);
+    };
+    scheduleRefresh();
+    window.addEventListener("focus", scheduleRefresh);
+    window.addEventListener("spectra-local-records-changed", scheduleRefresh);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", scheduleRefresh);
+      window.removeEventListener("spectra-local-records-changed", scheduleRefresh);
+    };
+  }, []);
+
   useEffect(() => {
     if (!authenticated) return;
     if (!journeyLoadedRef.current) return;
@@ -1894,5 +1925,5 @@ export default function SpectraApp({ authenticated, viewerName, authHref, authLa
     void Promise.resolve(context.registerTool({ name: "analyze_sample_spectrum", title: "分析示例光谱", description: "打开图像分析工作台并运行汞灯示例谱线分析。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute() { setActive("analysis"); setAnalyzeSignal((value) => value + 1); return { task: "A", source: "汞灯", analysisStarted: true }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
-  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
+  return <main className={`app-shell ${active === "home" ? "" : "module-ambient"}`}><AppHeader active={active} onChange={setActive} localRecordCount={localRecordCount} />{active === "home" && <HomeModule navigate={setActive} />}{active === "simulator" && <SimulatorModule journey={journey} navigate={setActive} updateJourney={updateJourney} />}{active === "assistant" && <AssistantModule journey={journey} navigate={setActive} />}{active === "analysis" && <AnalysisModule key={analyzeSignal} analyzeSignal={analyzeSignal} journey={journey} updateJourney={updateJourney} finishExperiment={resetExperiment} />}{active === "records" && <RecordsModule />}{active !== "assistant" && <footer><span><Aperture size={16} />SPECTRA · AI 分光计实验学习助手</span></footer>}<FloatingAssistant journey={journey} authenticated={authenticated} /><Toaster position="top-center" richColors /></main>;
 }
